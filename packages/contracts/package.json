@@ -1,0 +1,13 @@
+{
+  "name": "@homeworker/contracts",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./project.schema.json": "./schema/project.schema.json"
+  },
+  "scripts": {
+    "test": "node --test tests/schema.test.mjs"
+  }
+}

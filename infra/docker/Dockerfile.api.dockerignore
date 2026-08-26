@@ -1,0 +1,11 @@
+*
+!services/
+!services/api/
+!services/api/pyproject.toml
+!services/api/uv.lock
+!services/api/README.md
+!services/api/app/
+!services/api/app/**
+!assets/
+!assets/fonts/
+!assets/fonts/**

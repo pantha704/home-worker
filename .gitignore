@@ -1,0 +1,42 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# JavaScript
+node_modules/
+.next/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.py[cod]
+
+# Local application state
+data/
+uploads/
+exports/
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated artifacts
+dist/
+build/
+output/
+tmp/
+*.log
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

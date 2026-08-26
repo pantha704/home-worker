@@ -1,0 +1,70 @@
+services:
+  - type: web
+    name: homeworker-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./infra/docker/Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /ready
+    autoDeployTrigger: commit
+    envVars:
+      - key: INK_APP_ENV
+        value: production
+      - key: INK_RUNTIME_MODE
+        value: hosted
+      - key: INK_DATABASE_URL
+        sync: false
+      - key: INK_DATABASE_SCHEMA
+        value: homeworker
+      - key: INK_STORAGE_PROVIDER
+        value: supabase
+      - key: INK_PROCESSING_MODE
+        value: worker
+      - key: INK_START_WORKER
+        value: "true"
+      - key: INK_CORS_ORIGINS
+        sync: false
+      - key: INK_WORK_ROOT
+        value: /tmp/homeworker
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: homeworker-private
+      - key: INK_MAX_UPLOAD_BYTES
+        value: "10485760"
+      - key: INK_MAX_PDF_PAGES
+        value: "30"
+      - key: INK_MAX_IMAGE_PIXELS
+        value: "40000000"
+      - key: INK_MAX_EXTRACTED_CHARS_PER_PAGE
+        value: "300000"
+      - key: INK_MAX_TOTAL_EXTRACTED_CHARS
+        value: "1000000"
+      - key: INK_MAX_ARTIFACT_BYTES
+        value: "20971520"
+      - key: INK_MAX_PROJECTS_PER_USER
+        value: "20"
+      - key: INK_MAX_USER_STORAGE_BYTES
+        value: "104857600"
+      - key: INK_MAX_PROJECT_REVISIONS
+        value: "60"
+      - key: INK_UPLOAD_RATE_PER_HOUR
+        value: "20"
+      - key: INK_MUTATION_RATE_PER_HOUR
+        value: "240"
+      - key: INK_RETENTION_DAYS
+        value: "14"
+      - key: INK_OCR_DPI
+        value: "180"
+      - key: INK_OCR_TIMEOUT_SECONDS
+        value: "30"
+      - key: INK_OCR_LANGUAGES
+        value: eng
+      - key: ANALYZER_PROVIDER
+        value: rules
+      - key: PORT
+        value: "8000"

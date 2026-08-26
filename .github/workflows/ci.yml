@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  FORCE_COLOR: "1"
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.3.0
+        with:
+          python-version: 3.14.6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: 0.11.28
+          enable-cache: true
+          cache-dependency-glob: services/api/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Check formatting
+        run: uv run ruff format --check app tests
+
+      - name: Lint
+        run: uv run ruff check app tests
+
+      - name: Type-check
+        run: uv run mypy app
+
+      - name: Test
+        run: uv run pytest
+
+  frontend:
+    name: Frontend and contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 11.18.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type-check
+        run: pnpm typecheck
+
+      - name: Test contracts and UI
+        run: pnpm test
+
+      - name: Production build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        run: pnpm build
+
+      - name: Hosted static build
+        env:
+          NEXT_PUBLIC_RUNTIME_MODE: hosted
+          NEXT_PUBLIC_API_BASE_URL: https://homeworker-api.example.com
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+        run: pnpm --filter @homeworker/web build:hosted
+
+      - name: Install Chromium for end-to-end smoke test
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Run browser smoke test
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        run: pnpm --dir apps/web test:e2e
+
+  compose-smoke:
+    name: Container smoke test
+    needs:
+      - backend
+      - frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose model
+        run: docker compose -f infra/compose.yaml config --quiet
+
+      - name: Build local images
+        run: docker compose -f infra/compose.yaml build
+
+      - name: Verify non-root image users
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' homeworker-api:local)" = "10001:10001"
+          test "$(docker image inspect --format '{{.Config.User}}' homeworker-web:local)" = "10001:10001"
+
+      - name: Start and wait for health
+        run: docker compose -f infra/compose.yaml up -d --wait --wait-timeout 120
+
+      - name: Smoke liveness, readiness, and UI
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:8000/health
+          curl --fail --silent --show-error http://127.0.0.1:8000/ready
+          curl --fail --silent --show-error http://127.0.0.1:3000/
+
+      - name: Show service logs after failure
+        if: failure()
+        run: docker compose -f infra/compose.yaml logs --no-color --tail=200
+
+      - name: Stop stack
+        if: always()
+        run: docker compose -f infra/compose.yaml down --remove-orphans

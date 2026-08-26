@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1.14
+
+FROM node:24.18.0-alpine AS dependencies
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=${PNPM_HOME}:${PATH}
+WORKDIR /workspace
+
+RUN corepack enable && corepack prepare pnpm@11.18.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+FROM dependencies AS builder
+
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY apps/web apps/web
+COPY packages/contracts packages/contracts
+RUN mkdir -p apps/web/public && pnpm --filter @homeworker/web build
+
+FROM node:24.18.0-alpine AS runtime
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
+WORKDIR /app
+
+RUN addgroup -S -g 10001 ink \
+    && adduser -S -D -H -u 10001 -G ink ink
+
+COPY --from=builder --chown=10001:10001 /workspace/apps/web/.next/standalone ./
+COPY --from=builder --chown=10001:10001 /workspace/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=10001:10001 /workspace/apps/web/public ./apps/web/public
+RUN mkdir -p /app/apps/web/.next/cache \
+    && chown -R 10001:10001 /app
+
+USER 10001:10001
+EXPOSE 3000
+
+CMD ["node", "apps/web/server.js"]
