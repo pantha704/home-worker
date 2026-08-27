@@ -40,3 +40,8 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Local analysis / agent scratch (do not publish)
+.gitnexus/
+.claude/
+CLAUDE.md
+
