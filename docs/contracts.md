@@ -103,8 +103,8 @@ The project list uses bounded `limit`/`offset` pagination. Download responses us
 ## Writes, concurrency, and retries
 
 - Every patch/confirm/settings request and delete carries `expectedRevision`; a stale mutation returns `409 REVISION_CONFLICT` and creates no new revision/deletion.
-- Create is not yet idempotent, so clients must not retry it automatically. A production asynchronous extension adds `Idempotency-Key` (opaque, maximum 128 bytes) before horizontal scaling.
-- Clients may retry read-only requests after `408`, `429`, `502`, `503`, and `504` with exponential backoff and jitter. Writes require an explicit user action until idempotency is implemented.
+- Create accepts `Idempotency-Key` (1–128 visible characters). The same owner+key+bytes returns `200` with the original project and does not consume another quota slot. The same key with different bytes returns `409 IDEMPOTENCY_KEY_REUSE`. Clients may retry create after `408`/`429`/`5xx` **only** with a stable key.
+- Clients may retry read-only requests after `408`, `429`, `502`, `503`, and `504` with exponential backoff and jitter.
 - Confirm validates the current revision and the exact set of uncertain/warned block acknowledgements. Unknown or missing acknowledgements fail closed. Before confirmation the server returns only an inline PDF carrying `DRAFT - REVIEW REQUIRED`; reviewed artifacts use attachment disposition and exact-revision manifests.
 
 Delete removes the owner-scoped project row and dependent revisions/jobs/artifacts in one transaction while writing exact private keys to a deletion outbox. Cleanup is idempotently retried; an unavailable object service never makes the deleted project visible again.

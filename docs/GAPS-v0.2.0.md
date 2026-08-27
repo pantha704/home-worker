@@ -12,11 +12,11 @@ Snapshot: `be3797a` (local). Status: complete product slice for **local + $0 bet
 
 | ID | Issue | Severity |
 |----|--------|----------|
-| L1 | Source license is owner-evaluation / all rights reserved. Docs refuse to auto-pick MIT vs AGPL. **PyMuPDF is AGPL** — public binary distribution without a chosen license is a legal trap. | Blocker |
-| L2 | No public Terms, privacy policy, or operator contact. Must not be child/school-directed. | Blocker |
+| L1 | ~~Source license vs PyMuPDF AGPL~~ **Closed:** AGPL-3.0-only + NOTICE. | — |
+| L5 | ~~Create not idempotent~~ **Closed:** `Idempotency-Key` replay `200`, mismatch `409`. | — |
+| L2 | ~~No terms/privacy~~ **Closed:** `docs/terms.md`, `docs/privacy.md` (not child/school-directed). | — |
 | L3 | Live two-account IDOR, magic-link/TLS, restart recovery, 14-day expiry, and outbox drain are documented but not proven on a live hosted stack in this tree. | Blocker |
 | L4 | Untracked leftover work PDFs exist under `services/api/data/work/projects/*` (~1.1 MB). `.gitignore` covers `data/` but release zips must still exclude them. | High |
-| L5 | `create` is not idempotent (`Idempotency-Key` missing). Unsafe to run >1 API instance. | High |
 | L6 | OCR/PDF share the API process. Free Render sleep (~1 min cold start) will kill OCR jobs. Filesystem on free Render is ephemeral. | High |
 
 ## Must-change for real load

@@ -10,7 +10,7 @@ Free plans can pause, cold-start, or change their limits. Homeworker sets its ow
 
 ## 0. Legal gate before public launch
 
-The included owner-evaluation source license does not grant public redistribution rights. PyMuPDF is offered under AGPL or a commercial license. Before publishing the repository or serving the app publicly, the owner must either select compatible AGPL-3.0 terms, replace PyMuPDF with a compatible parser, or obtain the appropriate commercial permission. This repository does not silently make that legal choice.
+The project is licensed **AGPL-3.0-only** because it links PyMuPDF. Serving a modified network copy requires offering corresponding source. See `LICENSE`, `NOTICE`, and `docs/terms.md`.
 
 ## 1. Create Supabase Free
 

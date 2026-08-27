@@ -16,12 +16,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
-from fastapi import Depends, FastAPI, File, Query, Request, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile, status
 from fastapi import Path as RoutePath
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
-from sqlalchemy.exc import SQLAlchemyError
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.exceptions import HTTPException
 
 from .analyzer import analyze_pages
@@ -73,6 +73,21 @@ REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 MUTATING_METHODS = frozenset({"POST", "PATCH", "DELETE", "PUT"})
 ArtifactKind = Literal["handwritten_pdf", "companion_pdf", "companion_text"]
 IdentityDependency = Annotated[Identity, Depends(require_identity)]
+
+
+def _parse_idempotency_key(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    key = raw.strip()
+    if key == "":
+        return None
+    if len(key) > 128 or any(ord(char) < 32 for char in key):
+        raise InkError(
+            "INVALID_IDEMPOTENCY_KEY",
+            "Idempotency-Key must be 1-128 visible characters.",
+            status_code=400,
+        )
+    return key
 
 
 def _repository(request: Request) -> ProjectRepository:
@@ -351,9 +366,30 @@ def create_app(
         request: Request,
         identity: IdentityDependency,
         file: Annotated[UploadFile, File(description="PDF, PNG, or JPEG source document")],
-    ) -> ProjectDocument:
+        idempotency_key_header: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> ProjectDocument | JSONResponse:
         repository = _repository(request)
         store = _object_store(request)
+        idempotency_key = _parse_idempotency_key(idempotency_key_header)
+
+        stored = await store_upload(file, config)
+        if idempotency_key:
+            existing = await run_in_threadpool(
+                repository.get_by_idempotency_key, identity.owner_id, idempotency_key
+            )
+            if existing is not None:
+                await run_in_threadpool(remove_project_storage, config, stored.project_id)
+                if existing.sha256 != stored.sha256:
+                    raise InkError(
+                        "IDEMPOTENCY_KEY_REUSE",
+                        "That Idempotency-Key already created a different document.",
+                        status_code=409,
+                    )
+                return JSONResponse(
+                    status_code=200,
+                    content=existing.model_dump(mode="json", by_alias=True),
+                )
+
         await run_in_threadpool(
             repository.consume_rate,
             identity.owner_id,
@@ -369,7 +405,6 @@ def create_app(
                 details={"maxProjects": config.max_projects_per_user},
             )
 
-        stored = await store_upload(file, config)
         key = source_object_key(
             identity.owner_id,
             stored.project_id,
@@ -426,15 +461,37 @@ def create_app(
                 pages=pages,
                 error=None,
             )
-            return await run_in_threadpool(
-                repository.create,
-                identity.owner_id,
-                project,
-                source_key=key,
-                source_size=stored.size,
-                expires_at=now + timedelta(days=config.retention_days),
-                enqueue=enqueue,
-            )
+            try:
+                return await run_in_threadpool(
+                    repository.create,
+                    identity.owner_id,
+                    project,
+                    source_key=key,
+                    source_size=stored.size,
+                    expires_at=now + timedelta(days=config.retention_days),
+                    enqueue=enqueue,
+                    idempotency_key=idempotency_key,
+                )
+            except IntegrityError:
+                replay = (
+                    await run_in_threadpool(
+                        repository.get_by_idempotency_key, identity.owner_id, idempotency_key
+                    )
+                    if idempotency_key
+                    else None
+                )
+                if replay is None:
+                    raise
+                if replay.sha256 != stored.sha256:
+                    raise InkError(
+                        "IDEMPOTENCY_KEY_REUSE",
+                        "That Idempotency-Key already created a different document.",
+                        status_code=409,
+                    ) from None
+                return JSONResponse(
+                    status_code=200,
+                    content=replay.model_dump(mode="json", by_alias=True),
+                )
         except Exception:
             if object_written:
                 with suppress(Exception):

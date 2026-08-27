@@ -45,6 +45,7 @@ class ProjectRow(Base):
     __table_args__ = (
         Index("ix_projects_owner_updated", "owner_id", "updated_at"),
         Index("ix_projects_owner_status", "owner_id", "status"),
+        UniqueConstraint("owner_id", "idempotency_key", name="uq_projects_owner_idempotency"),
         {"schema": SCHEMA_TOKEN},
     )
 
@@ -62,6 +63,7 @@ class ProjectRow(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class RevisionRow(Base):
@@ -306,6 +308,7 @@ class ProjectRepository:
         source_size: int,
         expires_at: datetime,
         enqueue: bool,
+        idempotency_key: str | None = None,
     ) -> ProjectDocument:
         payload = project.model_dump(mode="json", by_alias=True)
         with self.sessions.begin() as session:
@@ -324,6 +327,7 @@ class ProjectRepository:
                 expires_at=expires_at,
                 created_at=project.created_at,
                 updated_at=project.updated_at,
+                idempotency_key=idempotency_key,
             )
             session.add(project_row)
             session.flush()
@@ -364,6 +368,18 @@ class ProjectRepository:
             )
             if row is None:
                 raise _not_found()
+            return ProjectDocument.model_validate(row.document)
+
+    def get_by_idempotency_key(self, owner_id: str, idempotency_key: str) -> ProjectDocument | None:
+        with self.sessions() as session:
+            row = session.scalar(
+                select(ProjectRow).where(
+                    ProjectRow.owner_id == owner_id,
+                    ProjectRow.idempotency_key == idempotency_key,
+                )
+            )
+            if row is None:
+                return None
             return ProjectDocument.model_validate(row.document)
 
     def get_source(self, owner_id: str, project_id: str) -> ProjectSource:

@@ -1,8 +1,8 @@
 # Third-party notices
 
-Homeworker depends on open-source packages declared in `package.json`, `pnpm-lock.yaml`, and `services/api/pyproject.toml`. Their license texts and attribution requirements remain with the corresponding packages.
+Homeworker is AGPL-3.0-only. It depends on open-source packages declared in `package.json`, `pnpm-lock.yaml`, and `services/api/pyproject.toml`. Their license texts remain with those packages.
 
-The bundled Caveat, Patrick Hand, and Kalam fonts are distributed under the SIL Open Font License 1.1. Exact license copies are stored beside the font files in `assets/fonts/OFL-*.txt`.
+**PyMuPDF** is licensed under AGPL-3.0 (or a commercial license from Artifex). Linking and serving Homeworker therefore requires AGPL source offer. We do not use a commercial PyMuPDF grant in this repository.
 
-The repository's evaluation-build license does not replace or narrow any third-party license.
+The bundled Caveat, Patrick Hand, and Kalam fonts are SIL Open Font License 1.1. Copies live in `assets/fonts/OFL-*.txt`.
 

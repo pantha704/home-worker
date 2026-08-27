@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Local-first document extraction, review, and A4 handwriting PDF API"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
-license = { text = "Proprietary" }
+license = { text = "AGPL-3.0-only" }
 dependencies = [
   "fastapi==0.139.2",
   "uvicorn[standard]==0.51.0",

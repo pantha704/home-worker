@@ -1,0 +1,12 @@
+Homeworker
+Copyright (c) 2026 Homeworker contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version, as stated in LICENSE (AGPL-3.0-or-later is not granted — this
+project is licensed AGPL-3.0-only).
+
+Homeworker links PyMuPDF, which is licensed under AGPL-3.0. Serving this
+application over a network therefore requires offering corresponding source
+under AGPL. See THIRD_PARTY_NOTICES.md.

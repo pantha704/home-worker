@@ -118,7 +118,15 @@ export async function createProject(
 ): Promise<ProjectDocument> {
   const form = new FormData();
   form.append("file", file, file.name);
-  return request<ProjectDocument>("/v1/projects", { method: "POST", body: form }, signal);
+  return request<ProjectDocument>(
+    "/v1/projects",
+    {
+      method: "POST",
+      body: form,
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    },
+    signal,
+  );
 }
 
 export async function listProjects(signal?: AbortSignal): Promise<ProjectList> {
