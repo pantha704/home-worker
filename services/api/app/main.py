@@ -27,7 +27,7 @@ from starlette.exceptions import HTTPException
 from .analyzer import analyze_pages
 from .auth import Identity, TokenVerifier, build_token_verifier, require_identity
 from .config import Settings
-from .db import ArtifactRecord, ProjectRepository
+from .db import ArtifactRecord, ProjectRepository, ProjectSource
 from .errors import (
     InkError,
     http_error_handler,
@@ -543,7 +543,9 @@ def create_app(
             patch,
         )
 
-    def _with_source_file(request: Request, owner_id: str, project_id: str):
+    def _with_source_file(
+        request: Request, owner_id: str, project_id: str
+    ) -> tuple[ProjectSource, Path, tempfile.TemporaryDirectory[str]]:
         repository = _repository(request)
         store = _object_store(request)
         source = repository.get_source(owner_id, project_id)
