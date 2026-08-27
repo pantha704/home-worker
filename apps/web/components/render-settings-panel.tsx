@@ -109,6 +109,10 @@ export function RenderSettingsPanel({ busy, deleting, personas, settings, onAppl
           <span><strong>Line spacing</strong><output>{draft.lineSpacing.toFixed(1)}×</output></span>
           <input max="2.5" min="0.8" onChange={(event) => update("lineSpacing", Number(event.target.value))} step="0.1" type="range" value={draft.lineSpacing} />
         </label>
+        <label className="range-control">
+          <span><strong>Hand size</strong><output>{draft.fontSizePt === 0 ? "persona" : `${draft.fontSizePt} pt`}</output></span>
+          <input max="22" min="0" onChange={(event) => update("fontSizePt", Number(event.target.value))} step="0.5" type="range" value={draft.fontSizePt} />
+        </label>
       </div>
 
       <div className="seed-control">

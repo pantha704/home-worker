@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import re
 import uuid
 from collections import defaultdict
@@ -238,10 +239,68 @@ def _ocr_blocks(
     ]
 
 
-def extract_document(path: Path, mime_type: str, settings: Settings) -> list[DocumentPage]:
+def extract_document(
+    path: Path,
+    mime_type: str,
+    settings: Settings,
+    *,
+    page_numbers: set[int] | None = None,
+    force_ocr: bool = False,
+) -> list[DocumentPage]:
     if mime_type == "application/pdf":
-        return _extract_pdf(path, settings)
+        return _extract_pdf(path, settings, page_numbers=page_numbers, force_ocr=force_ocr)
+    if page_numbers and page_numbers - {1}:
+        raise InkError(
+            "PAGE_NOT_FOUND",
+            "An image source only has page 1.",
+            status_code=404,
+            details={"pageNumbers": sorted(page_numbers)},
+        )
     return _extract_image(path, settings)
+
+
+def rasterize_source_page(
+    path: Path,
+    mime_type: str,
+    page_number: int,
+    *,
+    max_width: int = 900,
+) -> bytes:
+    """PNG of one source page for the side-by-side reviewer."""
+    if page_number < 1:
+        raise InkError("PAGE_NOT_FOUND", "Page numbers start at 1.", status_code=404)
+    buffer = io.BytesIO()
+    if mime_type == "application/pdf":
+        try:
+            with fitz.open(path) as document:
+                if page_number > document.page_count:
+                    raise InkError(
+                        "PAGE_NOT_FOUND",
+                        "That page is not in the source document.",
+                        status_code=404,
+                        details={"pageNumber": page_number, "pageCount": document.page_count},
+                    )
+                page = document[page_number - 1]
+                scale = min(2.2, max_width / max(page.rect.width, 1))
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False)
+                image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+        except InkError:
+            raise
+        except (fitz.FileDataError, RuntimeError, ValueError) as exc:
+            raise InkError("PDF_EXTRACTION_FAILED", "The source page could not be rendered.", status_code=422) from exc
+    else:
+        if page_number != 1:
+            raise InkError("PAGE_NOT_FOUND", "An image source only has page 1.", status_code=404)
+        try:
+            with Image.open(path) as source:
+                image = ImageOps.exif_transpose(source).convert("RGB")
+        except OSError as exc:
+            raise InkError("IMAGE_EXTRACTION_FAILED", "The image could not be decoded.", status_code=422) from exc
+        if image.width > max_width:
+            ratio = max_width / image.width
+            image = image.resize((max_width, max(1, int(image.height * ratio))))
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
 
 
 def enforce_total_text_limit(pages: list[DocumentPage], settings: Settings) -> None:
@@ -257,12 +316,30 @@ def enforce_total_text_limit(pages: list[DocumentPage], settings: Settings) -> N
             )
 
 
-def _extract_pdf(path: Path, settings: Settings) -> list[DocumentPage]:
+def _extract_pdf(
+    path: Path,
+    settings: Settings,
+    *,
+    page_numbers: set[int] | None = None,
+    force_ocr: bool = False,
+) -> list[DocumentPage]:
     pages: list[DocumentPage] = []
     try:
         with fitz.open(path) as document:
+            if page_numbers:
+                missing = sorted(n for n in page_numbers if n < 1 or n > document.page_count)
+                if missing:
+                    raise InkError(
+                        "PAGE_NOT_FOUND",
+                        "One or more requested pages are not in the source document.",
+                        status_code=404,
+                        details={"pageNumbers": missing, "pageCount": document.page_count},
+                    )
             for page in document:
-                native = _native_pdf_blocks(page, settings)
+                number = page.number + 1
+                if page_numbers is not None and number not in page_numbers:
+                    continue
+                native = [] if force_ocr else _native_pdf_blocks(page, settings)
                 if native:
                     blocks = native
                 else:

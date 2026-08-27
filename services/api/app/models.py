@@ -117,6 +117,7 @@ class RenderSettings(ApiModel):
     paper_style: PaperStyle = PaperStyle.RULED
     margin_mm: float = Field(default=15, ge=8, le=30)
     line_spacing: float = Field(default=1.25, ge=0.8, le=2.5)
+    font_size_pt: float = Field(default=0, ge=0, le=32)
 
 
 class ProjectError(ApiModel):
@@ -166,6 +167,33 @@ class BlockPatch(ApiModel):
         return value
 
 
+class PageTextPatch(ApiModel):
+    text: str = Field(max_length=200_000)
+    expected_revision: int = Field(ge=1)
+
+    @field_validator("text")
+    @classmethod
+    def reject_nul(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("text must not contain NUL characters")
+        return value
+
+
+class RetryPagesRequest(ApiModel):
+    expected_revision: int = Field(ge=1)
+    page_numbers: list[int] = Field(min_length=1, max_length=200)
+    force_ocr: bool = False
+
+    @field_validator("page_numbers")
+    @classmethod
+    def unique_positive_pages(cls, value: list[int]) -> list[int]:
+        if any(number < 1 for number in value):
+            raise ValueError("page numbers start at 1")
+        if len(value) != len(set(value)):
+            raise ValueError("page numbers must be unique")
+        return value
+
+
 class SettingsPatch(ApiModel):
     expected_revision: int = Field(ge=1)
     persona_id: PersonaId | None = None
@@ -174,6 +202,7 @@ class SettingsPatch(ApiModel):
     paper_style: PaperStyle | None = None
     margin_mm: float | None = Field(default=None, ge=8, le=30)
     line_spacing: float | None = Field(default=None, ge=0.8, le=2.5)
+    font_size_pt: float | None = Field(default=None, ge=0, le=32)
 
     @model_validator(mode="after")
     def require_change(self) -> SettingsPatch:

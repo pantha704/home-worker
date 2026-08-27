@@ -2455,6 +2455,143 @@ label:has(input:focus-visible) {
   }
 }
 
+.page-reviewer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 18px 0;
+}
+
+.page-reviewer-nav {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.page-reviewer-split {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+  min-height: 62vh;
+}
+
+.page-reviewer-source,
+.page-reviewer-text {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  position: relative;
+}
+
+.page-reviewer-source img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #ece8df;
+}
+
+.page-reviewer-text {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+}
+
+.page-reviewer-text textarea {
+  flex: 1;
+  min-height: 280px;
+  font: 15px/1.45 var(--font-serif);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.page-review-bar,
+.page-reviewer-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 18px 20px;
+}
+
+.page-refreshing {
+  align-items: center;
+  background: rgb(255 255 255 / 78%);
+  display: flex;
+  gap: 8px;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+}
+
+.book-studio {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr);
+  padding: 16px 18px 28px;
+}
+
+.book-stage {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.book-page {
+  background: #f7f1e4;
+  border-radius: 4px 14px 14px 4px;
+  box-shadow: var(--shadow-md);
+  flex: 1;
+  min-height: 70vh;
+  overflow: hidden;
+  position: relative;
+  transform-origin: left center;
+}
+
+.book-page.is-flipping {
+  animation: book-flip 280ms ease;
+}
+
+@keyframes book-flip {
+  from { transform: perspective(900px) rotateY(-12deg); }
+  to { transform: none; }
+}
+
+.book-page img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.book-folio {
+  bottom: 10px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  position: absolute;
+  right: 14px;
+}
+
+.book-nav {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 28px;
+  height: 44px;
+  width: 44px;
+}
+
+@media (max-width: 900px) {
+  .page-reviewer-split,
+  .book-studio {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

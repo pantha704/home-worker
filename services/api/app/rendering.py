@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 import random
 import threading
 from dataclasses import dataclass
@@ -284,21 +285,34 @@ def _draw_hand_line(
     base_size: float,
     rng: random.Random,
 ) -> None:
+    """Correlated irregularity: line slant, baseline wave, slow size drift — not per-glyph noise."""
+    if not line:
+        return
     cursor = x
-    for character in line:
+    n = max(len(line), 1)
+    slant = rng.uniform(-1.05, 1.05)
+    wave_amp = parameters.baseline_jitter * 0.9
+    wave_phase = rng.uniform(0, math.pi)
+    size_walk = rng.uniform(-parameters.size_jitter * 0.35, parameters.size_jitter * 0.35)
+    for index, character in enumerate(line):
+        t = index / n
         character_font = font_name if _font_supports(font_name, character) else fallback_font_name
-        size = base_size + rng.uniform(-parameters.size_jitter, parameters.size_jitter)
+        size = base_size + size_walk + math.sin(t * math.pi) * parameters.size_jitter * 0.2
+        if rng.random() < 0.035:
+            size += rng.choice((-0.7, 0.85))
         width = pdfmetrics.stringWidth(character, character_font, size)
-        if not character.isspace():
+        extra_gap = 0.0
+        if character.isspace():
+            extra_gap = rng.uniform(0.0, parameters.tracking * 2.4)
+        else:
             pdf.saveState()
-            pdf.translate(
-                cursor, y + rng.uniform(-parameters.baseline_jitter, parameters.baseline_jitter)
-            )
-            pdf.rotate(rng.uniform(-parameters.rotation_jitter, parameters.rotation_jitter))
+            lift = math.sin(wave_phase + t * math.pi * 1.35) * wave_amp
+            pdf.translate(cursor, y + lift + t * slant)
+            pdf.rotate(slant * 0.35)
             pdf.setFont(character_font, size)
             pdf.drawString(0, 0, character)
             pdf.restoreState()
-        cursor += width + parameters.tracking + rng.uniform(-0.04, 0.04)
+        cursor += width + parameters.tracking + extra_gap
 
 
 def render_handwritten(project: ProjectDocument) -> bytes:
@@ -312,7 +326,10 @@ def render_handwritten(project: ProjectDocument) -> bytes:
     page_width, page_height = A4
     margin = project.settings.margin_mm * mm
     max_width = page_width - 2 * margin
-    line_height = parameters.font_size * 1.42 * project.settings.line_spacing
+    persona_size = parameters.font_size
+    if project.settings.font_size_pt > 0:
+        persona_size = project.settings.font_size_pt
+    line_height = persona_size * 1.42 * project.settings.line_spacing
     ink = HexColor(project.settings.ink_color)
     current_sheet = 0
     y = 0.0
@@ -330,7 +347,7 @@ def render_handwritten(project: ProjectDocument) -> bytes:
             page_width - margin, 7 * mm, f"Source p.{source_page} · rev {project.revision}"
         )
         pdf.setFillColor(ink)
-        return float(page_height - margin - parameters.font_size)
+        return float(page_height - margin - persona_size)
 
     for source_page in project.pages:
         if current_sheet == 0:
@@ -338,7 +355,7 @@ def render_handwritten(project: ProjectDocument) -> bytes:
         else:
             y -= line_height * 0.55
         for block in source_page.blocks:
-            font_size = parameters.font_size * (1.17 if block.kind.value == "heading" else 1.0)
+            font_size = persona_size * (1.17 if block.kind.value == "heading" else 1.0)
             lines = _split_lines(block.text, font_name, font_size, max_width, parameters.tracking)
             for line in lines:
                 if y < margin + line_height:
@@ -427,3 +444,25 @@ def render_companion_text(project: ProjectDocument) -> bytes:
         for block in page.blocks:
             lines.extend((block.text, ""))
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+
+
+def render_handwritten_page_png(project: ProjectDocument, page_number: int, *, max_width: int = 900) -> bytes:
+    import fitz
+    from PIL import Image
+
+    pdf_bytes = render_handwritten(project)
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+        if page_number < 1 or page_number > document.page_count:
+            raise InkError(
+                "PAGE_NOT_FOUND",
+                "That handwritten sheet does not exist.",
+                status_code=404,
+                details={"pageNumber": page_number, "pageCount": document.page_count},
+            )
+        page = document[page_number - 1]
+        scale = min(2.0, max_width / max(page.rect.width, 1))
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False)
+        image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG", optimize=True)
+        return buffer.getvalue()

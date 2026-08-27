@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import uuid
 
 from .db import ProjectRepository
 from .errors import InkError
 from .models import (
+    BlockKind,
     BlockPatch,
     ConfirmRequest,
+    DocumentBlock,
     DocumentPage,
     ExtractionWarning,
     Extractor,
+    PageTextPatch,
     ProjectDocument,
     ProjectStatus,
     SettingsPatch,
+    SourceRegion,
     WarningSeverity,
 )
 
@@ -68,6 +73,89 @@ def patch_block(
         return _next_revision(updated)
 
     return repository.mutate(owner_id, project_id, patch.expected_revision, transform)
+
+
+def patch_page_text(
+    repository: ProjectRepository,
+    owner_id: str,
+    project_id: str,
+    page_number: int,
+    patch: PageTextPatch,
+) -> ProjectDocument:
+    def transform(current: ProjectDocument) -> ProjectDocument:
+        updated = current.model_copy(deep=True)
+        target = next((page for page in updated.pages if page.number == page_number), None)
+        if target is None:
+            raise InkError(
+                "PAGE_NOT_FOUND",
+                "No extracted page with that number exists in the project.",
+                status_code=404,
+            )
+        paragraphs = [part.strip() for part in patch.text.replace("\r\n", "\n").split("\n\n")]
+        paragraphs = [part for part in paragraphs if part] or [""]
+        target.blocks = [
+            DocumentBlock(
+                id=str(uuid.uuid4()),
+                kind=BlockKind.PARAGRAPH if text else BlockKind.UNKNOWN,
+                text=text,
+                confidence=1.0,
+                reviewed=True,
+                source=SourceRegion(
+                    page_number=page_number,
+                    bbox=None,
+                    extractor=Extractor.MANUAL,
+                ),
+                warnings=[
+                    ExtractionWarning(
+                        code="USER_CORRECTED",
+                        message="This page was edited during side-by-side review.",
+                        severity=WarningSeverity.INFO,
+                    )
+                ],
+            )
+            for text in paragraphs
+        ]
+        updated.status = ProjectStatus.NEEDS_REVIEW
+        return _next_revision(updated)
+
+    return repository.mutate(owner_id, project_id, patch.expected_revision, transform)
+
+
+def replace_extracted_pages(
+    repository: ProjectRepository,
+    owner_id: str,
+    project_id: str,
+    expected_revision: int,
+    replacements: list[DocumentPage],
+) -> ProjectDocument:
+    by_number = {page.number: page for page in replacements}
+
+    def transform(current: ProjectDocument) -> ProjectDocument:
+        updated = current.model_copy(deep=True)
+        if updated.status == ProjectStatus.FAILED:
+            raise InkError(
+                "INVALID_STATE_TRANSITION",
+                "A failed project cannot retry extraction.",
+                status_code=409,
+            )
+        existing = {page.number for page in updated.pages}
+        missing = sorted(number for number in by_number if number not in existing)
+        if missing:
+            raise InkError(
+                "PAGE_NOT_FOUND",
+                "Retry was requested for a page that is not in this revision.",
+                status_code=404,
+                details={"pageNumbers": missing},
+            )
+        updated.pages = [
+            by_number[page.number].model_copy(deep=True) if page.number in by_number else page
+            for page in updated.pages
+        ]
+        updated.status = ProjectStatus.NEEDS_REVIEW
+        updated.error = None
+        return _next_revision(updated)
+
+    return repository.mutate(owner_id, project_id, expected_revision, transform)
 
 
 def confirm_project(

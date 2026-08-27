@@ -157,6 +157,50 @@ export async function updateBlock(
   );
 }
 
+export async function updatePageText(
+  projectId: string,
+  pageNumber: number,
+  text: string,
+  expectedRevision: number,
+  signal?: AbortSignal,
+): Promise<ProjectDocument> {
+  return request<ProjectDocument>(
+    `/v1/projects/${encodeURIComponent(projectId)}/pages/${pageNumber}`,
+    { method: "PATCH", body: JSON.stringify({ text, expectedRevision }) },
+    signal,
+  );
+}
+
+export async function retryPages(
+  projectId: string,
+  pageNumbers: number[],
+  expectedRevision: number,
+  options: { forceOcr?: boolean; signal?: AbortSignal } = {},
+): Promise<ProjectDocument> {
+  return request<ProjectDocument>(
+    `/v1/projects/${encodeURIComponent(projectId)}/pages/retry`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        expectedRevision,
+        pageNumbers,
+        forceOcr: options.forceOcr ?? false,
+      }),
+    },
+    options.signal,
+  );
+}
+
+export async function fetchPngObjectUrl(
+  path: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const response = await authorizedFetch(path, { headers: { Accept: "image/png" } }, signal);
+  if (!response.ok) throw await errorFromResponse(response);
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
 export async function confirmProject(
   projectId: string,
   expectedRevision: number,

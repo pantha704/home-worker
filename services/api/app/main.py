@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+import tempfile
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -15,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
-from fastapi import Depends, FastAPI, File, Query, Request, UploadFile, status
+from fastapi import Depends, FastAPI, File, Path as RoutePath, Query, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -33,22 +34,24 @@ from .errors import (
     unexpected_error_handler,
     validation_error_handler,
 )
-from .extraction import enforce_total_text_limit, extract_document
+from .extraction import enforce_total_text_limit, extract_document, rasterize_source_page
 from .ingestion import EXTENSIONS, remove_project_storage, store_upload
 from .models import (
     ArtifactManifest,
     BlockPatch,
     ConfirmRequest,
     HealthResponse,
+    PageTextPatch,
     Persona,
     ProjectDocument,
     ProjectList,
     ProjectStatus,
     ReadinessResponse,
+    RetryPagesRequest,
     SettingsPatch,
 )
-from .rendering import personas, render_companion, render_companion_text, render_handwritten
-from .service import confirm_project, patch_block, patch_settings
+from .rendering import personas, render_companion, render_companion_text, render_handwritten, render_handwritten_page_png
+from .service import confirm_project, patch_block, patch_page_text, patch_settings, replace_extracted_pages
 from .storage import ObjectStore, artifact_object_key, build_object_store, source_object_key
 from .worker import worker_loop
 
@@ -526,6 +529,116 @@ def create_app(
             block_id,
             patch,
         )
+
+    def _with_source_file(request: Request, owner_id: str, project_id: str):
+        repository = _repository(request)
+        store = _object_store(request)
+        source = repository.get_source(owner_id, project_id)
+        config.work_root.mkdir(parents=True, exist_ok=True)
+        raw = tempfile.TemporaryDirectory(prefix="homeworker-page-", dir=config.work_root)
+        path = Path(raw.name) / f"source{EXTENSIONS[source.mime_type]}"
+        store.get_to_path(source.source_key, path)
+        return source, path, raw
+
+    @application.patch(
+        "/v1/projects/{project_id}/pages/{page_number}",
+        response_model=ProjectDocument,
+        tags=["review"],
+    )
+    async def update_page_text(
+        request: Request,
+        project_id: str,
+        page_number: Annotated[int, RoutePath(ge=1)],
+        patch: PageTextPatch,
+        identity: IdentityDependency,
+    ) -> ProjectDocument:
+        await _consume_mutation(request, identity.owner_id)
+        return await run_in_threadpool(
+            patch_page_text,
+            _repository(request),
+            identity.owner_id,
+            project_id,
+            page_number,
+            patch,
+        )
+
+    @application.post(
+        "/v1/projects/{project_id}/pages/retry",
+        response_model=ProjectDocument,
+        tags=["review"],
+    )
+    async def retry_pages(
+        request: Request,
+        project_id: str,
+        body: RetryPagesRequest,
+        identity: IdentityDependency,
+    ) -> ProjectDocument:
+        await _consume_mutation(request, identity.owner_id)
+
+        def run() -> ProjectDocument:
+            source, path, raw = _with_source_file(request, identity.owner_id, project_id)
+            try:
+                pages = extract_document(
+                    path,
+                    source.mime_type,
+                    config,
+                    page_numbers=set(body.page_numbers),
+                    force_ocr=body.force_ocr,
+                )
+                pages = analyze_pages(pages, config)
+                current = _repository(request).get(identity.owner_id, project_id)
+                by_number = {page.number: page for page in pages}
+                preview = [
+                    by_number[page.number] if page.number in by_number else page
+                    for page in current.pages
+                ]
+                enforce_total_text_limit(preview, config)
+                return replace_extracted_pages(
+                    _repository(request),
+                    identity.owner_id,
+                    project_id,
+                    body.expected_revision,
+                    pages,
+                )
+            finally:
+                raw.cleanup()
+
+        return await run_in_threadpool(run)
+
+    @application.get("/v1/projects/{project_id}/pages/{page_number}/source.png", tags=["review"])
+    async def source_page_png(
+        request: Request,
+        project_id: str,
+        page_number: Annotated[int, RoutePath(ge=1)],
+        identity: IdentityDependency,
+    ) -> Response:
+        def run() -> bytes:
+            _source, path, raw = _with_source_file(request, identity.owner_id, project_id)
+            try:
+                source = _repository(request).get_source(identity.owner_id, project_id)
+                return rasterize_source_page(path, source.mime_type, page_number)
+            finally:
+                raw.cleanup()
+
+        content = await run_in_threadpool(run)
+        return Response(content=content, media_type="image/png", headers={"Cache-Control": "private, max-age=60"})
+
+    @application.get("/v1/projects/{project_id}/sheets/{page_number}.png", tags=["rendering"])
+    async def handwritten_sheet_png(
+        request: Request,
+        project_id: str,
+        page_number: Annotated[int, RoutePath(ge=1)],
+        identity: IdentityDependency,
+        revision: Annotated[int | None, Query(ge=1)] = None,
+    ) -> Response:
+        def run() -> bytes:
+            project = _load_project_revision(
+                _repository(request), identity.owner_id, project_id, revision
+            )
+            return render_handwritten_page_png(project, page_number)
+
+        content = await run_in_threadpool(run)
+        return Response(content=content, media_type="image/png", headers={"Cache-Control": "private, no-store"})
 
     @application.post(
         "/v1/projects/{project_id}/confirm",

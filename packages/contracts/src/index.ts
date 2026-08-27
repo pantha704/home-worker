@@ -61,6 +61,7 @@ export interface RenderSettings {
   paperStyle: PaperStyle;
   marginMm: number;
   lineSpacing: number;
+  fontSizePt: number;
 }
 
 export interface ProjectDocument {

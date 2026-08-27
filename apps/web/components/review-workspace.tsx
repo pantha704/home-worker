@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Persona, ProjectDocument, RenderSettings } from "@homeworker/contracts";
 
-import { A4Preview } from "@/components/a4-preview";
+import { BookStudio } from "@/components/book-studio";
 import { useAuth } from "@/components/auth-provider";
-import { BlockEditor } from "@/components/block-editor";
 import { CheckIcon, FileIcon, RefreshIcon, WarningIcon } from "@/components/icons";
+import { PageReviewer } from "@/components/page-reviewer";
 import { ProjectToolbar } from "@/components/project-toolbar";
-import { RenderSettingsPanel } from "@/components/render-settings-panel";
 import {
   confirmProject,
   deleteProject,
@@ -19,11 +18,12 @@ import {
   getProject,
   isConflictError,
   HomeworkerApiError,
+  retryPages,
   saveBlob,
-  updateBlock,
+  updatePageText,
   updateProjectSettings,
 } from "@/lib/api";
-import { flattenBlocks, needsHumanReview } from "@/lib/project";
+import { flattenBlocks, pagePlainText } from "@/lib/project";
 import { forgetProject, rememberProject } from "@/lib/recent-projects";
 
 const FALLBACK_PERSONAS: Persona[] = [
@@ -31,9 +31,6 @@ const FALLBACK_PERSONAS: Persona[] = [
   { id: "casual", name: "Casual", description: "Loose and lively", license: "SIL Open Font License 1.1" },
   { id: "compact", name: "Compact", description: "Clear and space-efficient", license: "SIL Open Font License 1.1" },
 ];
-
-type WorkspacePane = "review" | "style" | "preview";
-type BlockFilter = "checks" | "all";
 
 export function ReviewWorkspace({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -44,11 +41,12 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [acknowledgedIds, setAcknowledgedIds] = useState<Set<string>>(() => new Set());
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<BlockFilter>("checks");
-  const [activePane, setActivePane] = useState<WorkspacePane>("review");
   const [reloadToken, setReloadToken] = useState(0);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set());
+  const [stage, setStage] = useState<"review" | "finalize">("review");
+  const [refreshingPage, setRefreshingPage] = useState<number | null>(null);
 
   useEffect(() => {
     if (authLoading || (hosted && !session)) {
@@ -69,6 +67,7 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
         if (nextProject.status === "processing") {
           pollTimer = setTimeout(load, 1_500);
         }
+        if (nextProject.status === "ready") setStage("finalize");
       } catch (error) {
         if (!active || controller.signal.aborted) return;
         const message = error instanceof HomeworkerApiError
@@ -96,49 +95,71 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
     return () => controller.abort();
   }, [authLoading, hosted, session]);
 
-  const blocks = useMemo(() => project ? flattenBlocks(project.pages) : [], [project]);
-  const reviewableBlocks = useMemo(() => blocks.filter((block) => needsHumanReview(block) || block.reviewed), [blocks]);
-  const remainingBlocks = useMemo(
-    () => reviewableBlocks.filter((block) => !block.reviewed && !acknowledgedIds.has(block.id)),
-    [acknowledgedIds, reviewableBlocks],
-  );
-  const reviewedCount = reviewableBlocks.length - remainingBlocks.length;
-  const progressPercent = reviewableBlocks.length === 0 ? 100 : Math.round((reviewedCount / reviewableBlocks.length) * 100);
-  const visibleBlocks = filter === "checks" ? blocks.filter((block) => needsHumanReview(block) || acknowledgedIds.has(block.id)) : blocks;
+  const pages = project?.pages ?? [];
+  const currentPage = pages[pageIndex] ?? pages[0];
+  const draftText = currentPage ? (drafts[currentPage.number] ?? pagePlainText(currentPage)) : "";
 
   async function recoverConflict(message: string) {
     try {
       const fresh = await getProject(projectId);
       setProject(fresh);
-      setAcknowledgedIds(new Set());
+      setDrafts({});
       setMutationError(message);
     } catch {
       setMutationError("This project changed elsewhere. Reload the page before continuing.");
     }
   }
 
-  async function saveBlock(blockId: string, text: string) {
-    if (!project) return;
-    setBusyAction(`block:${blockId}`);
+  async function saveCurrentPage() {
+    if (!project || !currentPage) return;
+    setBusyAction(`page:${currentPage.number}`);
     setMutationError(null);
     try {
-      const next = await updateBlock(project.id, blockId, text, project.revision);
+      const next = await updatePageText(project.id, currentPage.number, draftText, project.revision);
       setProject(next);
-      setAcknowledgedIds((current) => new Set(current).add(blockId));
+      setDrafts((current) => {
+        const copy = { ...current };
+        delete copy[currentPage.number];
+        return copy;
+      });
     } catch (error) {
       if (isConflictError(error)) {
-        await recoverConflict("A newer revision was loaded. Please check your correction and try again.");
+        await recoverConflict("A newer revision was loaded. Check this page and save again.");
       } else {
-        setMutationError(error instanceof HomeworkerApiError ? error.message : "The correction could not be saved.");
+        setMutationError(error instanceof HomeworkerApiError ? error.message : "The page could not be saved.");
       }
-      throw error;
     } finally {
       setBusyAction(null);
     }
   }
 
-  function acknowledgeBlock(blockId: string) {
-    setAcknowledgedIds((current) => new Set(current).add(blockId));
+  async function retrySelected() {
+    if (!project || selectedPages.size === 0) return;
+    const numbers = [...selectedPages].sort((a, b) => a - b);
+    setBusyAction("retry");
+    setMutationError(null);
+    setRefreshingPage(numbers[0] ?? null);
+    try {
+      let revision = project.revision;
+      let latest = project;
+      for (const number of numbers) {
+        setRefreshingPage(number);
+        latest = await retryPages(latest.id, [number], revision, { forceOcr: true });
+        revision = latest.revision;
+      }
+      setProject(latest);
+      setSelectedPages(new Set());
+      setDrafts({});
+    } catch (error) {
+      if (isConflictError(error)) {
+        await recoverConflict("The document changed. Re-select pages to retry.");
+      } else {
+        setMutationError(error instanceof HomeworkerApiError ? error.message : "Those pages could not be re-extracted.");
+      }
+    } finally {
+      setBusyAction(null);
+      setRefreshingPage(null);
+    }
   }
 
   async function applySettings(settings: RenderSettings) {
@@ -159,23 +180,23 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
     }
   }
 
-  async function finishReview() {
-    if (!project || remainingBlocks.length > 0) return;
+  async function submitReview() {
+    if (!project) return;
     setBusyAction("confirm");
     setMutationError(null);
     try {
-      const next = await confirmProject(
-        project.id,
-        project.revision,
-        [...acknowledgedIds],
-      );
+      if (currentPage && (drafts[currentPage.number] ?? pagePlainText(currentPage)) !== pagePlainText(currentPage)) {
+        await saveCurrentPage();
+      }
+      const latest = await getProject(project.id);
+      const next = await confirmProject(latest.id, latest.revision, flattenBlocks(latest.pages).map((block) => block.id));
       setProject(next);
-      setAcknowledgedIds(new Set());
+      setStage("finalize");
     } catch (error) {
       if (isConflictError(error)) {
-        await recoverConflict("The document changed during review. Recheck the updated blocks before confirming.");
+        await recoverConflict("The document changed during review. Recheck pages before submitting.");
       } else {
-        setMutationError(error instanceof HomeworkerApiError ? error.message : "The review could not be confirmed.");
+        setMutationError(error instanceof HomeworkerApiError ? error.message : "The review could not be submitted.");
       }
     } finally {
       setBusyAction(null);
@@ -202,14 +223,6 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
     } finally {
       setBusyAction(null);
     }
-  }
-
-  function jumpToNextCheck() {
-    const next = remainingBlocks[0];
-    if (!next) return;
-    setFilter("checks");
-    setSelectedBlockId(next.id);
-    document.getElementById(`block-${next.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   async function downloadHandwritten() {
@@ -257,7 +270,6 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
     );
   }
 
-  const previewAvailable = project.status !== "processing" && project.status !== "failed" && blocks.length > 0;
   const exportReady = project.status === "ready";
   return (
     <main className="project-app">
@@ -270,18 +282,10 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
         status={project.status}
       />
 
-      <nav aria-label="Workspace views" className="mobile-workspace-tabs">
-        {(["review", "style", "preview"] as const).map((pane) => (
-          <button aria-pressed={activePane === pane} className={activePane === pane ? "is-active" : ""} key={pane} onClick={() => setActivePane(pane)} type="button">
-            {pane === "review" ? "Review" : pane === "style" ? "Style" : "Preview"}
-          </button>
-        ))}
-      </nav>
-
       {project.status === "processing" ? (
         <div className="processing-banner" role="status">
           <span className="spinner" />
-          <div><strong>Extraction is in progress</strong><span>This page updates automatically. Your source is treated as content, never as an instruction.</span></div>
+          <div><strong>Extraction is in progress</strong><span>This page updates automatically.</span></div>
         </div>
       ) : null}
 
@@ -293,93 +297,50 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
         <div className="mutation-error" role="alert"><WarningIcon size={18} /><span>{mutationError}</span><button aria-label="Dismiss error" onClick={() => setMutationError(null)} type="button">×</button></div>
       ) : null}
 
-      <div className="workspace-grid">
-        <section className={`review-column mobile-pane ${activePane === "review" ? "is-mobile-active" : ""}`}>
-          <div className="review-header">
-            <div>
-              <span className="eyebrow">Content review</span>
-              <h1>Check before you print</h1>
-              <p>Every word below comes from the source. Correct uncertainty; nothing is rewritten automatically.</p>
-            </div>
-            <div className="review-progress-card">
-              <div className="progress-copy"><strong>{progressPercent}%</strong><span>{remainingBlocks.length === 0 ? "Checks complete" : `${remainingBlocks.length} left to check`}</span></div>
-              <div aria-label={`${progressPercent}% of required review completed`} aria-valuemax={100} aria-valuemin={0} aria-valuenow={progressPercent} className="progress-track" role="progressbar"><span style={{ width: `${progressPercent}%` }} /></div>
-            </div>
+      {stage === "review" && currentPage ? (
+        <>
+          <PageReviewer
+            busyPage={refreshingPage}
+            draftText={draftText}
+            index={Math.min(pageIndex, pages.length - 1)}
+            onDraftChange={(text) => setDrafts((current) => ({ ...current, [currentPage.number]: text }))}
+            onIndexChange={setPageIndex}
+            onSave={() => void saveCurrentPage()}
+            onToggleSelect={() => {
+              setSelectedPages((current) => {
+                const next = new Set(current);
+                if (next.has(currentPage.number)) next.delete(currentPage.number);
+                else next.add(currentPage.number);
+                return next;
+              });
+            }}
+            page={currentPage}
+            pageCount={pages.length}
+            projectId={project.id}
+            refreshing={busyAction === "retry"}
+            selected={selectedPages.has(currentPage.number)}
+          />
+          <div className="page-review-bar">
+            <button className="button button-secondary" disabled={selectedPages.size === 0 || busyAction === "retry"} onClick={() => void retrySelected()} type="button">
+              {busyAction === "retry" ? "Re-extracting…" : `Retry ${selectedPages.size || ""} selected page${selectedPages.size === 1 ? "" : "s"}`}
+            </button>
+            <button className="button button-primary" disabled={busyAction === "confirm" || pages.length === 0} onClick={() => void submitReview()} type="button">
+              {busyAction === "confirm" ? <><span className="spinner" /> Submitting…</> : <><CheckIcon size={17} /> Submit for handwriting</>}
+            </button>
           </div>
-
-          <div className="review-controls">
-            <div className="filter-tabs" role="group" aria-label="Filter extracted blocks">
-              <button aria-pressed={filter === "checks"} className={filter === "checks" ? "is-active" : ""} onClick={() => setFilter("checks")} type="button">Needs attention <span>{remainingBlocks.length}</span></button>
-              <button aria-pressed={filter === "all"} className={filter === "all" ? "is-active" : ""} onClick={() => setFilter("all")} type="button">All blocks <span>{blocks.length}</span></button>
-            </div>
-            {remainingBlocks.length > 0 ? <button className="jump-button" onClick={jumpToNextCheck} type="button">Next check →</button> : null}
-          </div>
-
-          {visibleBlocks.length > 0 ? (
-            <div className="block-list">
-              {visibleBlocks.map((block, index) => {
-                const showPageDivider = index === 0 || visibleBlocks[index - 1]?.documentPage !== block.documentPage;
-                return (
-                  <div id={`block-${block.id}`} key={block.id}>
-                    {showPageDivider ? <div className="page-divider"><span>Page {block.documentPage}</span></div> : null}
-                    <BlockEditor
-                      acknowledged={acknowledgedIds.has(block.id)}
-                      block={block}
-                      busy={busyAction === `block:${block.id}`}
-                      isSelected={selectedBlockId === block.id}
-                      onAcknowledge={acknowledgeBlock}
-                      onSave={saveBlock}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          ) : project.status === "processing" ? (
-            <div className="review-empty"><span className="spinner spinner-large" /><h2>Finding content blocks…</h2><p>Clear sections will appear here as processing completes.</p></div>
-          ) : filter === "checks" && blocks.length > 0 ? (
-            <div className="review-empty success"><CheckIcon size={28} /><h2>No uncertain blocks left.</h2><p>Open “All blocks” for a final scan, then confirm the review.</p></div>
-          ) : (
-            <div className="review-empty"><FileIcon size={28} /><h2>No readable content was found.</h2><p>Try a clearer scan or a PDF with selectable text.</p><Link className="button button-secondary button-small" href="/">Upload another file</Link></div>
-          )}
-
-          {project.status === "needs_review" ? (
-            <div className="confirm-review-bar">
-              <div>
-                <strong>{remainingBlocks.length === 0 ? "Ready to confirm" : "Review is not finished"}</strong>
-                <span>{remainingBlocks.length === 0 ? "Confirming locks this reviewed revision for export." : `Check ${remainingBlocks.length} remaining ${remainingBlocks.length === 1 ? "block" : "blocks"} before export.`}</span>
-              </div>
-              <button className="button button-primary" disabled={remainingBlocks.length > 0 || busyAction === "confirm"} onClick={finishReview} type="button">
-                {busyAction === "confirm" ? <><span className="spinner" /> Confirming…</> : <><CheckIcon size={17} /> Confirm review</>}
-              </button>
-            </div>
-          ) : project.status === "ready" ? (
-            <div className="confirmed-banner"><CheckIcon size={20} /><div><strong>Reviewed revision confirmed</strong><span>Downloads are unlocked. Any later edit creates a new revision to review.</span></div></div>
-          ) : null}
-        </section>
-
-        <aside className="studio-column" aria-label="Page design and preview">
-          <div className={`style-pane mobile-pane ${activePane === "style" ? "is-mobile-active" : ""}`}>
-            <RenderSettingsPanel
-              busy={busyAction === "settings"}
-              deleting={busyAction === "delete"}
-              key={`${project.settings.personaId}-${project.settings.seed}-${project.settings.inkColor}-${project.settings.paperStyle}-${project.settings.marginMm}-${project.settings.lineSpacing}`}
-              onApply={applySettings}
-              onDelete={removeProject}
-              personas={personas}
-              settings={project.settings}
-            />
-          </div>
-          <div className={`preview-pane mobile-pane ${activePane === "preview" ? "is-mobile-active" : ""}`}>
-            <A4Preview
-              exportReady={exportReady}
-              filename={project.filename}
-              previewAvailable={previewAvailable}
-              projectId={project.id}
-              revision={project.revision}
-            />
-          </div>
-        </aside>
-      </div>
+        </>
+      ) : stage === "finalize" ? (
+        <BookStudio
+          busy={busyAction === "settings"}
+          deleting={busyAction === "delete"}
+          onApply={applySettings}
+          onDelete={removeProject}
+          personas={personas}
+          project={project}
+        />
+      ) : (
+        <div className="review-empty"><FileIcon size={28} /><h2>No readable pages yet.</h2></div>
+      )}
     </main>
   );
 }

@@ -41,6 +41,7 @@ export function makeProject(overrides: Partial<ProjectDocument> = {}): ProjectDo
       paperStyle: "ruled",
       marginMm: 15,
       lineSpacing: 1.2,
+      fontSizePt: 0,
     },
     error: null,
     ...overrides,
