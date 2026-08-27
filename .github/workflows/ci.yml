@@ -144,9 +144,8 @@ jobs:
 
       - name: Smoke liveness, readiness, and UI
         run: |
-          curl --fail --silent --show-error http://127.0.0.1:8000/health
-          curl --fail --silent --show-error http://127.0.0.1:8000/ready
-          curl --fail --silent --show-error http://127.0.0.1:3000/
+          docker compose -f infra/compose.yaml exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read(); urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5).read()"
+          docker compose -f infra/compose.yaml exec -T web node -e "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
       - name: Show service logs after failure
         if: failure()
