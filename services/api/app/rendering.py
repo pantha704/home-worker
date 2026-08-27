@@ -446,7 +446,9 @@ def render_companion_text(project: ProjectDocument) -> bytes:
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
-def render_handwritten_page_png(project: ProjectDocument, page_number: int, *, max_width: int = 900) -> bytes:
+def render_handwritten_page_png(
+    project: ProjectDocument, page_number: int, *, max_width: int = 900
+) -> bytes:
     import fitz
     from PIL import Image
 
@@ -461,7 +463,9 @@ def render_handwritten_page_png(project: ProjectDocument, page_number: int, *, m
             )
         page = document[page_number - 1]
         scale = min(2.0, max_width / max(page.rect.width, 1))
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False)
+        pixmap = page.get_pixmap(
+            matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False
+        )
         image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=True)

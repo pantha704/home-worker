@@ -282,12 +282,16 @@ def rasterize_source_page(
                     )
                 page = document[page_number - 1]
                 scale = min(2.2, max_width / max(page.rect.width, 1))
-                pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False)
+                pixmap = page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False
+                )
                 image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
         except InkError:
             raise
         except (fitz.FileDataError, RuntimeError, ValueError) as exc:
-            raise InkError("PDF_EXTRACTION_FAILED", "The source page could not be rendered.", status_code=422) from exc
+            raise InkError(
+                "PDF_EXTRACTION_FAILED", "The source page could not be rendered.", status_code=422
+            ) from exc
     else:
         if page_number != 1:
             raise InkError("PAGE_NOT_FOUND", "An image source only has page 1.", status_code=404)
@@ -295,7 +299,9 @@ def rasterize_source_page(
             with Image.open(path) as source:
                 image = ImageOps.exif_transpose(source).convert("RGB")
         except OSError as exc:
-            raise InkError("IMAGE_EXTRACTION_FAILED", "The image could not be decoded.", status_code=422) from exc
+            raise InkError(
+                "IMAGE_EXTRACTION_FAILED", "The image could not be decoded.", status_code=422
+            ) from exc
         if image.width > max_width:
             ratio = max_width / image.width
             image = image.resize((max_width, max(1, int(image.height * ratio))))

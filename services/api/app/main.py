@@ -16,7 +16,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
-from fastapi import Depends, FastAPI, File, Path as RoutePath, Query, Request, UploadFile, status
+from fastapi import Depends, FastAPI, File, Query, Request, UploadFile, status
+from fastapi import Path as RoutePath
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -50,8 +51,20 @@ from .models import (
     RetryPagesRequest,
     SettingsPatch,
 )
-from .rendering import personas, render_companion, render_companion_text, render_handwritten, render_handwritten_page_png
-from .service import confirm_project, patch_block, patch_page_text, patch_settings, replace_extracted_pages
+from .rendering import (
+    personas,
+    render_companion,
+    render_companion_text,
+    render_handwritten,
+    render_handwritten_page_png,
+)
+from .service import (
+    confirm_project,
+    patch_block,
+    patch_page_text,
+    patch_settings,
+    replace_extracted_pages,
+)
 from .storage import ObjectStore, artifact_object_key, build_object_store, source_object_key
 from .worker import worker_loop
 
@@ -588,10 +601,7 @@ def create_app(
                 pages = analyze_pages(pages, config)
                 current = _repository(request).get(identity.owner_id, project_id)
                 by_number = {page.number: page for page in pages}
-                preview = [
-                    by_number[page.number] if page.number in by_number else page
-                    for page in current.pages
-                ]
+                preview = [by_number.get(page.number, page) for page in current.pages]
                 enforce_total_text_limit(preview, config)
                 return replace_extracted_pages(
                     _repository(request),
@@ -621,7 +631,11 @@ def create_app(
                 raw.cleanup()
 
         content = await run_in_threadpool(run)
-        return Response(content=content, media_type="image/png", headers={"Cache-Control": "private, max-age=60"})
+        return Response(
+            content=content,
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=60"},
+        )
 
     @application.get("/v1/projects/{project_id}/sheets/{page_number}.png", tags=["rendering"])
     async def handwritten_sheet_png(
@@ -638,7 +652,9 @@ def create_app(
             return render_handwritten_page_png(project, page_number)
 
         content = await run_in_threadpool(run)
-        return Response(content=content, media_type="image/png", headers={"Cache-Control": "private, no-store"})
+        return Response(
+            content=content, media_type="image/png", headers={"Cache-Control": "private, no-store"}
+        )
 
     @application.post(
         "/v1/projects/{project_id}/confirm",

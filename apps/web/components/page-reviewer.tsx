@@ -42,8 +42,6 @@ export function PageReviewer({
   useEffect(() => {
     const controller = new AbortController();
     let objectUrl: string | null = null;
-    setImageUrl(null);
-    setImageError(null);
     fetchPngObjectUrl(
       `/v1/projects/${encodeURIComponent(projectId)}/pages/${page.number}/source.png`,
       controller.signal,
@@ -51,8 +49,12 @@ export function PageReviewer({
       .then((url) => {
         objectUrl = url;
         setImageUrl(url);
+        setImageError(null);
       })
-      .catch(() => setImageError("Source preview unavailable."));
+      .catch(() => {
+        setImageUrl(null);
+        setImageError("Source preview unavailable.");
+      });
     return () => {
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -95,6 +97,8 @@ export function PageReviewer({
             </div>
           ) : null}
           {imageUrl ? (
+            // Blob URLs from the API; next/image cannot optimize them.
+            // eslint-disable-next-line @next/next/no-img-element
             <img alt={`Source page ${page.number}`} src={imageUrl} />
           ) : (
             <p>{imageError ?? "Loading source…"}</p>

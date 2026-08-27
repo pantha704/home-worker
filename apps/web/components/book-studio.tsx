@@ -17,14 +17,12 @@ interface BookStudioProps {
 
 export function BookStudio({ busy, deleting, personas, project, onApply, onDelete }: BookStudioProps) {
   const [sheet, setSheet] = useState(1);
-  const [maxSheet, setMaxSheet] = useState(1);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [flipping, setFlipping] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     let objectUrl: string | null = null;
-    setImageUrl(null);
     fetchPngObjectUrl(
       `/v1/projects/${encodeURIComponent(project.id)}/sheets/${sheet}.png?revision=${project.revision}`,
       controller.signal,
@@ -32,7 +30,6 @@ export function BookStudio({ busy, deleting, personas, project, onApply, onDelet
       .then((url) => {
         objectUrl = url;
         setImageUrl(url);
-        setMaxSheet((current) => Math.max(current, sheet));
       })
       .catch(() => {
         if (sheet > 1) setSheet((current) => Math.max(1, current - 1));
@@ -57,6 +54,8 @@ export function BookStudio({ busy, deleting, personas, project, onApply, onDelet
         </button>
         <div className={`book-page ${flipping ? "is-flipping" : ""}`}>
           {imageUrl ? (
+            // Blob URLs from the API; next/image cannot optimize them.
+            // eslint-disable-next-line @next/next/no-img-element
             <img alt={`Handwritten A4 sheet ${sheet}`} src={imageUrl} />
           ) : (
             <div className="book-loading" role="status">
@@ -66,15 +65,7 @@ export function BookStudio({ busy, deleting, personas, project, onApply, onDelet
           )}
           <span className="book-folio">A4 · sheet {sheet}</span>
         </div>
-        <button
-          aria-label="Next sheet"
-          className="book-nav"
-          onClick={() => {
-            setMaxSheet((current) => Math.max(current, sheet + 1));
-            go(sheet + 1);
-          }}
-          type="button"
-        >
+        <button aria-label="Next sheet" className="book-nav" onClick={() => go(sheet + 1)} type="button">
           ›
         </button>
       </div>
