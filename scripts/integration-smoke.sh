@@ -8,7 +8,7 @@ api_url="http://127.0.0.1:${api_port}"
 web_url="http://127.0.0.1:${web_port}"
 keep_workdir="${INK_SMOKE_KEEP:-0}"
 
-for command in corepack curl jq pdfinfo uv; do
+for command in curl jq pdfinfo pgrep uv; do
   if ! command -v "$command" >/dev/null 2>&1; then
     printf 'Missing required command: %s\n' "$command" >&2
     exit 1
@@ -25,21 +25,31 @@ fi
 
 api_pid=""
 web_pid=""
+web_dist_dir="tmp/smoke-next-$$"
+
+terminate_tree() {
+  local pid="$1"
+  local child
+  while read -r child; do
+    [[ -n "$child" ]] && terminate_tree "$child"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" >/dev/null 2>&1 || true
+}
 
 cleanup() {
   if [[ -n "$web_pid" ]]; then
-    kill "$web_pid" >/dev/null 2>&1 || true
-    wait "$web_pid" >/dev/null 2>&1 || true
+    terminate_tree "$web_pid"
   fi
   if [[ -n "$api_pid" ]]; then
-    kill "$api_pid" >/dev/null 2>&1 || true
-    wait "$api_pid" >/dev/null 2>&1 || true
+    terminate_tree "$api_pid"
   fi
   if [[ "$keep_workdir" != "1" ]]; then
     rm -rf "$workdir"
   else
     printf 'Smoke artifacts: %s\n' "$workdir"
   fi
+  rm -rf "$repo_root/apps/web/$web_dist_dir"
 }
 trap cleanup EXIT INT TERM
 
@@ -95,13 +105,16 @@ mkdir -p "$workdir/storage"
   INK_STORAGE_ROOT="$workdir/storage" \
   INK_DATABASE_URL="sqlite:///$workdir/homeworker.db" \
   INK_CORS_ORIGINS="$web_url" \
-    uv run --frozen uvicorn app.main:app --host 127.0.0.1 --port "$api_port"
+    "$repo_root/services/api/.venv/bin/uvicorn" app.main:app --host 127.0.0.1 --port "$api_port"
 ) >"$workdir/api.log" 2>&1 &
 api_pid="$!"
 
-NEXT_PUBLIC_API_BASE_URL="$api_url" NEXT_TELEMETRY_DISABLED=1 \
-  corepack pnpm --filter @homeworker/web dev --hostname 127.0.0.1 --port "$web_port" \
-  >"$workdir/web.log" 2>&1 &
+(
+  cd "$repo_root/apps/web"
+  HOMEWORKER_NEXT_DIST_DIR="$web_dist_dir" \
+  NEXT_PUBLIC_API_BASE_URL="$api_url" NEXT_TELEMETRY_DISABLED=1 \
+    "$repo_root/apps/web/node_modules/.bin/next" dev --hostname 127.0.0.1 --port "$web_port"
+) >"$workdir/web.log" 2>&1 &
 web_pid="$!"
 
 wait_for_url "$api_url/ready" "$workdir/api.log"

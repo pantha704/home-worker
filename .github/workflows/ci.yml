@@ -59,6 +59,38 @@ jobs:
       - name: Test
         run: uv run pytest
 
+  release-audit:
+    name: Release audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Test release verifier
+        run: python -m unittest scripts.test_verify_release -v
+
+      - name: Audit tracked release files
+        run: python scripts/verify_release.py
+
+      - name: Build and inspect source archive
+        run: |
+          scripts/package-release.sh /tmp/Homeworker-v0.2.0.zip
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          archive = Path("/tmp/Homeworker-v0.2.0.zip")
+          with zipfile.ZipFile(archive) as release:
+              names = set(release.namelist())
+          assert "Homeworker/README.md" in names
+          assert "Homeworker/.homeworker-goals.md" not in names
+          assert "Homeworker/.homeworker-issues.md" not in names
+          assert not any("/data/work/" in name for name in names)
+          PY
+
   frontend:
     name: Frontend and contracts
     runs-on: ubuntu-24.04

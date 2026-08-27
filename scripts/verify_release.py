@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import re
+import subprocess
 import sys
-
+from dataclasses import dataclass
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -93,27 +93,46 @@ SECRET_PATTERNS = [
 ]
 
 
-def relative(path: Path) -> Path:
-    return path.relative_to(ROOT)
+def iter_release_entries(root: Path) -> list[Path]:
+    """List releasable entries without scanning ignored development state."""
+    if (root / ".git").exists():
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+        )
+        return sorted(
+            (root / raw.decode("utf-8") for raw in result.stdout.split(b"\0") if raw),
+            key=lambda path: path.as_posix(),
+        )
+    return sorted(root.rglob("*"), key=lambda path: path.as_posix())
 
 
-def inspect() -> list[Finding]:
+def inspect(root: Path = ROOT) -> list[Finding]:
     findings: list[Finding] = []
 
     for item in REQUIRED:
-        path = ROOT / item
+        path = root / item
         if not path.is_file() or path.stat().st_size == 0:
             findings.append(Finding("required-file", path, "missing or empty"))
 
     for item in REQUIRED_EXECUTABLE:
-        path = ROOT / item
+        path = root / item
         if path.is_file() and path.stat().st_mode & 0o111 == 0:
             findings.append(Finding("executable", path, "shell entry point is not executable"))
 
-    for path in ROOT.rglob("*"):
-        rel = relative(path)
-        if path.is_dir() and path.name in FORBIDDEN_DIRS:
-            findings.append(Finding("generated-directory", rel, "exclude from release"))
+    reported_generated: set[Path] = set()
+    for path in iter_release_entries(root):
+        rel = path.relative_to(root)
+        forbidden_index = next(
+            (index for index, part in enumerate(rel.parts) if part in FORBIDDEN_DIRS), None
+        )
+        if forbidden_index is not None:
+            generated = Path(*rel.parts[: forbidden_index + 1])
+            if generated not in reported_generated:
+                findings.append(Finding("generated-directory", generated, "exclude from release"))
+                reported_generated.add(generated)
             continue
         if not path.is_file():
             continue
@@ -136,12 +155,12 @@ def inspect() -> list[Finding]:
         "packages/contracts/schema/project.schema.json",
         "skills/document-analyst/output.schema.json",
     ):
-        path = ROOT / item
+        path = root / item
         if path.is_file():
             try:
                 json.loads(path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
-                findings.append(Finding("invalid-json", relative(path), str(exc)))
+                findings.append(Finding("invalid-json", path.relative_to(root), str(exc)))
 
     return findings
 

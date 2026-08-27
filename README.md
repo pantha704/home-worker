@@ -150,4 +150,4 @@ OCR—especially handwriting, math, tables, mixed scripts, and poor scans—can 
 
 ## License status
 
-The application source is an owner-evaluation build with all rights reserved until the owner selects a public source license. Bundled fonts retain their SIL Open Font License 1.1 terms. See `LICENSE` and `THIRD_PARTY_NOTICES.md`.
+Homeworker is licensed **AGPL-3.0-only** because it links PyMuPDF. Bundled fonts retain their SIL Open Font License 1.1 terms. See `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES.md`.

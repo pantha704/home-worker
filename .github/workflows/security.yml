@@ -68,8 +68,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - name: Audit locked production JavaScript dependencies
-        run: pnpm audit --prod --audit-level high
+      - name: Audit locked JavaScript dependencies
+        run: pnpm audit --audit-level moderate
 
   containers:
     name: Container vulnerabilities
