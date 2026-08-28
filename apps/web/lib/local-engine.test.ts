@@ -62,7 +62,9 @@ describe("browser-local PDF engine", () => {
     const pdf = await PDFDocument.load(bytes);
 
     expect(pdf.getPageCount()).toBeGreaterThan(1);
-    expect(await renderedText(bytes)).toContain(finalMarker);
+    const rendered = (await renderedText(bytes)).replace(/\s+/g, " ").trim();
+    expect(rendered).toBe(text);
+    expect(rendered).toContain(finalMarker);
   });
 
   it("splits an over-width token without dropping characters", async () => {
