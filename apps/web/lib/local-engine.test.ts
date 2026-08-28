@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts } from "pdf-lib";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 // @ts-expect-error pdfjs-dist does not publish declarations for its worker entrypoint.
 import { WorkerMessageHandler } from "pdfjs-dist/legacy/build/pdf.worker.mjs";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -15,6 +16,16 @@ async function textPdf(text: string): Promise<Uint8Array> {
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   page.drawText(text, { x: 40, y: 540, size: 16, font });
   return pdf.save();
+}
+
+async function renderedText(bytes: Uint8Array): Promise<string> {
+  const document = await getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+  const pages: string[] = [];
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const content = await (await document.getPage(pageNumber)).getTextContent();
+    pages.push(content.items.flatMap((item) => "str" in item ? [item.str] : []).join(" "));
+  }
+  return pages.join(" ");
 }
 
 describe("browser-local PDF engine", () => {
@@ -42,5 +53,21 @@ describe("browser-local PDF engine", () => {
     const pdf = await PDFDocument.load(bytes);
     expect(pdf.getPageCount()).toBe(1);
     expect(pdf.getPage(0).getSize()).toMatchObject({ width: 595.28, height: 841.89 });
+  });
+
+  it("does not truncate reviewed text that overflows the first A4 page", async () => {
+    const finalMarker = "LOSSLESS_FINAL_MARKER";
+    const text = `${Array.from({ length: 900 }, (_, index) => `word-${index}`).join(" ")} ${finalMarker}`;
+    const bytes = await renderA4Pdf(text);
+    const pdf = await PDFDocument.load(bytes);
+
+    expect(pdf.getPageCount()).toBeGreaterThan(1);
+    expect(await renderedText(bytes)).toContain(finalMarker);
+  });
+
+  it("splits an over-width token without dropping characters", async () => {
+    const token = "X".repeat(240);
+    const rendered = await renderedText(await renderA4Pdf(token));
+    expect(rendered.replace(/\s+/g, "")).toBe(token);
   });
 });
