@@ -104,37 +104,10 @@ export function WarningIcon(props: IconProps) {
   );
 }
 
-export function EditIcon(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <path d="m4 16.8-.5 3.7 3.7-.5L18 9.2l-3.2-3.2L4 16.8Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
-      <path d="m13.5 7.3 3.2 3.2" stroke="currentColor" strokeWidth="1.7" />
-    </IconBase>
-  );
-}
-
 export function RefreshIcon(props: IconProps) {
   return (
     <IconBase {...props}>
       <path d="M19 8V4m0 0h-4m4 0-3.1 3.1A7 7 0 1 0 18.4 15" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
-    </IconBase>
-  );
-}
-
-export function MoreIcon(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <circle cx="5" cy="12" fill="currentColor" r="1.5" />
-      <circle cx="12" cy="12" fill="currentColor" r="1.5" />
-      <circle cx="19" cy="12" fill="currentColor" r="1.5" />
-    </IconBase>
-  );
-}
-
-export function CloseIcon(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <path d="m6 6 12 12M18 6 6 18" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
     </IconBase>
   );
 }
