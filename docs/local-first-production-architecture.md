@@ -184,6 +184,45 @@ Terminate and recreate a worker after fatal parser errors, memory pressure, or a
 
 Telemetry is opt-in or strictly necessary aggregate operations telemetry. Never include filenames, OCR text, thumbnails, source/export bytes, document-derived labels, URLs containing project IDs, or stable cross-device fingerprints.
 
+## Minimal Supabase account plane
+
+Supabase is an account/control plane, not the document system of record. Local guest mode requires no account. Supabase Auth owns credentials and sessions; Homeworker never stores passwords.
+
+Server-owned records are deliberately small:
+
+| Record | Purpose | Noise/privacy rule |
+|---|---|---|
+| `account_profiles` | account lifecycle, accepted policy versions, created/updated/deleted timestamps | no document or device fields |
+| `billing_subscriptions` | provider references and authoritative subscription state | service-only; provider IDs are never returned to the browser |
+| `account_entitlements` | safe current plan/features/assisted limits | browser receives only a bounded API projection |
+| `usage_periods` | atomic assisted jobs/pages/bytes/seconds counters per billing period | assisted mode only; local work is not counted remotely |
+| `account_login_daily` | successful/failed login aggregates and last success per UTC day | no row per token refresh; no permanent IP/user-agent history |
+| `account_events` | sparse account/security lifecycle audit | allowlisted event types only; no generic analytics payload |
+| `webhook_inbox` | idempotent payment/auth event processing | unique provider event ID; no full secret-bearing payload retention |
+| `deletion_requests` | account deletion state and completion proof | one active request per account |
+
+### Fail-safe authority rules
+
+- Browser roles cannot insert, update, or delete authoritative account, subscription, entitlement, usage, webhook, or audit rows.
+- All base tables are default-deny with forced RLS and no permissive client-write policy. A narrow server API returns only the user's safe account projection.
+- Subscription state changes only from verified provider webhooks. The client can request checkout/cancellation but cannot declare success.
+- Every external event has a provider-scoped unique ID. Duplicate delivery returns the original result and creates no duplicate event, entitlement, or usage change.
+- Webhook handling uses one database transaction: register event, validate allowed transition, update subscription/entitlement, append one sparse audit event, then mark processed. A failure rolls back the whole transition.
+- Reject stale provider events using provider event time/version while retaining their deduplicated receipt status for reconciliation.
+- Usage is incremented only from a canonical assisted-job transition committed by the server. Values are non-negative, bounded, period-scoped, and updated atomically; client-reported counters are ignored.
+- Entitlement checks and assisted-job admission happen in the same transaction or against a revision/version that is rechecked before accepting work.
+- Account deletion first blocks new sessions/jobs, cancels queued work, marks document cleanup, and completes only after all server-owned rows/objects have reached verified terminal deletion states.
+- Database migrations use expand/migrate/contract, are backward-compatible during rollout, and have a rehearsed restore path. Never guess a destructive downgrade.
+- Supabase or account-plane failure never blocks opening, editing, exporting, or deleting an already-local project. Paid/assisted operations fail closed with a clear degraded-state message.
+
+### No-noise event policy
+
+Allowed durable account events are limited to material transitions such as account created, policy accepted, plan changed, subscription state changed, account suspended/restored, deletion requested, and deletion completed. Login activity is a daily aggregate, not an append-only event stream. Token refresh, page view, heartbeat, progress percentage, local page completion, local OCR timing, and UI clicks are not durable account events.
+
+Operational metrics aggregate status/count/duration buckets without document IDs or user timelines. Repeated identical readiness or dependency failures are rate-limited and coalesced. Alerts fire on state transitions or sustained threshold breaches, not each retry. Every stored field and metric must have an owner, purpose, retention period, and deletion behavior; otherwise it is not collected.
+
+Required tests include duplicate and out-of-order webhooks, concurrent quota admission, rollback after each transaction step, forged client plan/usage updates, cross-user reads, deleted/suspended accounts, Supabase outage, retention purge, and proof that local processing emits no account/usage row.
+
 ## Local job and revision state machines
 
 Project:
