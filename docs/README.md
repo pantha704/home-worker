@@ -4,7 +4,8 @@ These documents describe the production intent of the local-first vertical slice
 
 ## Start here
 
-- [Architecture](architecture.md): components, trust boundaries, state, and data flow.
+- [Architecture](architecture.md): current v0.2.0 components, trust boundaries, state, and data flow.
+- [Local-first production architecture](local-first-production-architecture.md): reviewed post-v0.2.0 browser-local decision, failure model, migration phases, and proof gates.
 - [Canonical IR and API contract](contracts.md): invariants and versioned HTTP assumptions.
 - [Local-first services](local-first-services.md): free defaults and optional upgrade seams.
 - [Threat model](threat-model.md): abuse cases and required controls.

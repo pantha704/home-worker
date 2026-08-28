@@ -40,6 +40,10 @@ Status: runnable local-first product slice; public hosted acceptance is not yet 
 | S5 | Expand the rights-cleared adversarial/fidelity corpus: malformed/polyglot/bomb files, OCR prompt text, XSS, IDOR, multilingual, math/tables, accessibility, clipping, and physical A4. |
 | S6 | Add signed manifests, SBOM generation, pinned production image digests, and explicit dependency-audit gates. |
 
+## Proposed post-v0.2.0 direction
+
+The reviewed browser-local architecture is documented in `docs/local-first-production-architecture.md`. It is a phased proposal, not current product behavior. OPFS/IndexedDB persistence, browser WASM extraction/OCR/rendering, portable project archives, capability classes, and the explicit assisted fallback remain blocked by the proof gates in that document.
+
 ## Evidence and claim limits
 
 - Hosted auth, owner-scoped persistence, private storage, leased jobs, and deletion outbox exist in code and automated tests; that is not a substitute for live vendor acceptance.
