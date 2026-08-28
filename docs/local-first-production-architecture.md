@@ -1,6 +1,6 @@
 # Local-first production architecture
 
-Status: proposed architecture decision for the post-v0.2.0 product
+Status: accepted direction; first one-page text-layer PDF proof implemented on `main`
 
 ## Decision
 

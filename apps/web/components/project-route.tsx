@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import { ReviewWorkspace } from "@/components/review-workspace";
+import { LocalReviewWorkspace } from "@/components/local-review-workspace";
 
 export function ProjectRoute() {
   const projectId = useSearchParams().get("id")?.trim();
@@ -16,5 +17,7 @@ export function ProjectRoute() {
       </main>
     );
   }
-  return <ReviewWorkspace projectId={projectId} />;
+  return projectId.startsWith("local_")
+    ? <LocalReviewWorkspace projectId={projectId} />
+    : <ReviewWorkspace projectId={projectId} />;
 }

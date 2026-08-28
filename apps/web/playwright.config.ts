@@ -7,12 +7,15 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: "http://127.0.0.1:13200",
+    launchOptions: process.env.PLAYWRIGHT_CHROME_PATH
+      ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH }
+      : undefined,
     trace: "on-first-retry",
   },
   webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1",
-    url: "http://127.0.0.1:3000/",
+    command: "npm run dev -- --hostname 127.0.0.1 --port 13200",
+    url: "http://127.0.0.1:13200/",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

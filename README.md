@@ -2,6 +2,8 @@
 
 Homeworker turns PDFs and document images into reviewable A4 notes rendered in a licensed handwriting persona. Version 0.2.0 is a **local-first** vertical slice (upload → extract/OCR → per-page review → confirm → A4 export). OCR is uncertain evidence, not truth.
 
+`main` also contains the first post-v0.2 browser-local proof: a one-page PDF with a usable text layer can be parsed in a dedicated worker, stored in OPFS + IndexedDB, reviewed through immutable revisions, reopened, exported as A4 PDF, and backed up/restored as a digest-verified `.homeworker` archive without sending document data to `/v1/`. Scanned and multi-page PDFs fail closed in this proof; browser OCR and full parity remain release gates.
+
 The optional hosted profile (Cloudflare Pages / Render / Supabase Free) exists in-tree but is **not** a public-launch SLA: free dynos sleep, disks are ephemeral, and you must pass the live two-account check in `docs/free-public-deployment.md` before inviting anyone.
 
 License: **AGPL-3.0-only** (required by PyMuPDF). Terms: [docs/terms.md](docs/terms.md). Privacy: [docs/privacy.md](docs/privacy.md).

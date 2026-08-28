@@ -40,7 +40,7 @@ const PNG = Buffer.from(
   "base64",
 );
 
-test("uploads a source and opens the transparent review workspace", async ({ page }) => {
+test("opens the server-backed transparent review workspace", async ({ page }) => {
   await page.route("http://localhost:8000/v1/**", async (route) => {
     const url = route.request().url();
     if (url.endsWith("/v1/personas")) {
@@ -54,14 +54,7 @@ test("uploads a source and opens the transparent review workspace", async ({ pag
     }
   });
 
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: /notes that feel written/i })).toBeVisible();
-  await expect(page.getByText(/no silent rewriting/i)).toBeVisible();
-
-  await page.locator("#source-file").setInputFiles({ name: "cell-notes.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.7") });
-  await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
-
-  await expect(page).toHaveURL(/\/project\?id=smoke-project$/);
+  await page.goto("/project?id=smoke-project");
   await expect(page.getByText(/Page 1 \/ 1/)).toBeVisible();
   await expect(page.getByLabel(/extracted text for page 1/i)).toHaveValue(/cell membrane/i);
   await expect(page.getByRole("button", { name: /^export$/i })).toBeDisabled();

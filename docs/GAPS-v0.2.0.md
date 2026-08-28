@@ -42,7 +42,7 @@ Status: runnable local-first product slice; public hosted acceptance is not yet 
 
 ## Proposed post-v0.2.0 direction
 
-The reviewed browser-local architecture is documented in `docs/local-first-production-architecture.md`. It is a phased proposal, not current product behavior. OPFS/IndexedDB persistence, browser WASM extraction/OCR/rendering, portable project archives, capability classes, and the explicit assisted fallback remain blocked by the proof gates in that document.
+The reviewed browser-local architecture is documented in `docs/local-first-production-architecture.md`. Its first narrow proof is implemented: one-page text-layer PDF parsing in a dedicated worker, OPFS content-addressed objects, IndexedDB immutable revisions, expected-revision conflict checks, Web Locks, quota/persistence gates, local A4 PDF generation, and digest-verified `.homeworker` export/import. A real Chrome acceptance test proves reopen/edit/export with no `/v1/` document traffic. Browser OCR, multi-page processing, source-page raster review, full renderer parity, cross-browser acceptance, migration/rollback, cleanup, and assisted fallback remain open gates.
 
 ## Evidence and claim limits
 

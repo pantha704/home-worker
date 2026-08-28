@@ -7,6 +7,7 @@ import { AuthPanel } from "@/components/auth-panel";
 import { FileIcon, UploadIcon, WarningIcon } from "@/components/icons";
 import { useAuth } from "@/components/auth-provider";
 import { createProject, HomeworkerApiError } from "@/lib/api";
+import { createBrowserProject, importBrowserArchive } from "@/lib/browser-local";
 import { rememberProject } from "@/lib/recent-projects";
 import {
   formatFileSize,
@@ -45,17 +46,23 @@ export function UploadDropzone() {
     if (!selectedFile || state === "uploading") return;
     const controller = new AbortController();
     setState("uploading");
-    setMessage("Uploading securely and checking the document…");
+    setMessage(hosted ? "Uploading securely and checking the document…" : "Processing privately in this browser…");
 
     try {
-      const project = await createProject(selectedFile, controller.signal);
+      const project = hosted
+        ? await createProject(selectedFile, controller.signal)
+        : await createBrowserProject(selectedFile);
       rememberProject({ id: project.id, filename: project.filename, updatedAt: project.updatedAt });
       router.push(`/project?id=${encodeURIComponent(project.id)}`);
     } catch (error) {
       const detail =
         error instanceof HomeworkerApiError
           ? error.message
-          : "Could not reach the local Homeworker service. Make sure the API is running.";
+          : hosted
+            ? "Could not reach the Homeworker service."
+            : error instanceof Error
+              ? error.message
+              : "This browser could not process the document locally.";
       setMessage(detail);
       setState("error");
     }
@@ -66,6 +73,20 @@ export function UploadDropzone() {
     setMessage(null);
     setState("idle");
     if (inputRef.current) inputRef.current.value = "";
+  }
+
+  async function restoreArchive(file: File | undefined) {
+    if (!file) return;
+    setState("uploading");
+    setMessage("Verifying and restoring the local backup…");
+    try {
+      const project = await importBrowserArchive(new Uint8Array(await file.arrayBuffer()));
+      rememberProject({ id: project.id, filename: project.filename, updatedAt: project.updatedAt });
+      router.push(`/project?id=${encodeURIComponent(project.id)}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The backup could not be restored.");
+      setState("error");
+    }
   }
 
   if (loading) {
@@ -137,6 +158,18 @@ export function UploadDropzone() {
       </button>
 
       <p className="upload-assurance"><span>✓</span> Your wording stays unchanged until you edit it.</p>
+      {!hosted ? (
+        <label className="text-button" htmlFor="project-archive">
+          Restore .homeworker backup
+          <input
+            accept=".homeworker,application/vnd.homeworker.project+json"
+            className="sr-only"
+            id="project-archive"
+            onChange={(event) => void restoreArchive(event.target.files?.[0])}
+            type="file"
+          />
+        </label>
+      ) : null}
     </div>
   );
 }
