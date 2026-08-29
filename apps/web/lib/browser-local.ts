@@ -17,7 +17,8 @@ interface WorkerFailure { kind: "error"; error: string }
 function isWorkerResponse(value: unknown): value is WorkerResult | WorkerFailure {
   if (value === null || typeof value !== "object" || !("kind" in value)) return false;
   if (value.kind === "error") return "error" in value && typeof value.error === "string";
-  return value.kind === "result" && "pdf" in value && value.pdf instanceof Uint8Array;
+  return value.kind === "result" && "pdf" in value
+    && Object.prototype.toString.call(value.pdf) === "[object Uint8Array]";
 }
 
 const DB_NAME = "homeworker-local-v1";
