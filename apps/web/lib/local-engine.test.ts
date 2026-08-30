@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 // @ts-expect-error pdfjs-dist does not publish declarations for its worker entrypoint.
@@ -55,6 +57,43 @@ describe("browser-local PDF engine", () => {
     ]);
   });
 
+  it("preserves visual lines and horizontal reading order", async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const page = pdf.addPage([400, 600]);
+    page.drawText("Second", { x: 130, y: 500, size: 16, font });
+    page.drawText("First", { x: 40, y: 500, size: 16, font });
+    page.drawText("Next line", { x: 40, y: 470, size: 16, font });
+
+    await expect(extractTextPages(await pdf.save())).resolves.toEqual([
+      { pageNumber: 1, text: "First Second\nNext line" },
+    ]);
+  });
+
+  it("keeps a shifted superscript on its visual line", async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const page = pdf.addPage([400, 600]);
+    page.drawText("E = mc", { x: 40, y: 500, size: 16, font });
+    page.drawText("2", { x: 95, y: 507, size: 10, font });
+
+    await expect(extractTextPages(await pdf.save())).resolves.toEqual([
+      { pageNumber: 1, text: "E = mc 2" },
+    ]);
+  });
+
+  it("rejects repeated multi-column rows instead of scrambling reading order", async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const page = pdf.addPage([400, 600]);
+    page.drawText("Left one", { x: 40, y: 500, size: 16, font });
+    page.drawText("Right one", { x: 250, y: 500, size: 16, font });
+    page.drawText("Left two", { x: 40, y: 470, size: 16, font });
+    page.drawText("Right two", { x: 250, y: 470, size: 16, font });
+
+    await expect(extractTextPages(await pdf.save())).rejects.toThrow("multiple columns");
+  });
+
   it("rejects oversized page counts before extracting content", async () => {
     const pdf = await PDFDocument.create();
     for (let page = 0; page < 101; page += 1) pdf.addPage();
@@ -71,16 +110,45 @@ describe("browser-local PDF engine", () => {
   });
 
   it("renders reviewed text into a real A4 PDF", async () => {
-    const bytes = await renderA4Pdf("Reviewed wording");
+    const fontBytes = await readFile("../../assets/fonts/Kalam-Regular.ttf");
+    const bytes = await renderA4Pdf("Reviewed wording", fontBytes);
     const pdf = await PDFDocument.load(bytes);
     expect(pdf.getPageCount()).toBe(1);
     expect(pdf.getPage(0).getSize()).toMatchObject({ width: 595.28, height: 841.89 });
   });
 
+  it("renders readable handwritten lines instead of a tiny top-row paragraph", async () => {
+    const fontBytes = await readFile("../../assets/fonts/Kalam-Regular.ttf");
+    const text = "A meaningful handwritten note should wrap into readable lines with comfortable spacing and useful page coverage. ".repeat(3);
+    const bytes = await renderA4Pdf(text, fontBytes);
+    const document = await getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+    const content = await (await document.getPage(1)).getTextContent();
+    const items = content.items.filter((item): item is typeof item & { str: string; transform: number[]; height: number } => "str" in item && Boolean(item.str.trim()));
+    const baselines = new Set(items.map((item) => Math.round(item.transform[5])));
+
+    expect(baselines.size).toBeGreaterThanOrEqual(5);
+    expect(Math.max(...items.map((item) => item.height))).toBeGreaterThanOrEqual(16);
+  });
+
+  it("uses one ruled line per explicit text line without adding blank rows", async () => {
+    const fontBytes = await readFile("../../assets/fonts/Kalam-Regular.ttf");
+    const bytes = await renderA4Pdf("First line\nSecond line", fontBytes);
+    const document = await getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
+    const content = await (await document.getPage(1)).getTextContent();
+    const baselines = content.items
+      .filter((item): item is typeof item & { str: string; transform: number[] } => "str" in item && Boolean(item.str.trim()))
+      .map((item) => item.transform[5])
+      .sort((left, right) => right - left);
+
+    expect(baselines).toHaveLength(2);
+    expect(baselines[0] - baselines[1]).toBeCloseTo(26, 0);
+  });
+
   it("does not truncate reviewed text that overflows the first A4 page", async () => {
+    const fontBytes = await readFile("../../assets/fonts/Kalam-Regular.ttf");
     const finalMarker = "LOSSLESS_FINAL_MARKER";
     const text = `${Array.from({ length: 900 }, (_, index) => `word-${index}`).join(" ")} ${finalMarker}`;
-    const bytes = await renderA4Pdf(text);
+    const bytes = await renderA4Pdf(text, fontBytes);
     const pdf = await PDFDocument.load(bytes);
 
     expect(pdf.getPageCount()).toBeGreaterThan(1);
@@ -90,8 +158,9 @@ describe("browser-local PDF engine", () => {
   });
 
   it("splits an over-width token without dropping characters", async () => {
+    const fontBytes = await readFile("../../assets/fonts/Kalam-Regular.ttf");
     const token = "X".repeat(240);
-    const rendered = await renderedText(await renderA4Pdf(token));
+    const rendered = await renderedText(await renderA4Pdf(token, fontBytes));
     expect(rendered.replace(/\s+/g, "")).toBe(token);
   });
 });

@@ -2,6 +2,22 @@
 
 import { extractTextPages, renderA4Pdf } from "@/lib/local-engine";
 
+let handwritingFont: Promise<Uint8Array> | undefined;
+
+function loadHandwritingFont(): Promise<Uint8Array> {
+  handwritingFont ??= fetch("/fonts/Kalam-Regular.ttf")
+    .then((response) => {
+      if (!response.ok) throw new Error("The handwriting font could not be loaded.");
+      return response.arrayBuffer();
+    })
+    .then((buffer) => new Uint8Array(buffer))
+    .catch((error) => {
+      handwritingFont = undefined;
+      throw error;
+    });
+  return handwritingFont;
+}
+
 type Request =
   | { action: "process"; requestId: string; source: Uint8Array }
   | { action: "render"; requestId: string; text: string };
@@ -13,10 +29,10 @@ self.onmessage = async (event: MessageEvent<Request>) => {
         self.postMessage({ kind: "progress", requestId: event.data.requestId, completed, total });
       });
       const text = pages.map((page) => page.text).join("\n\n");
-      const pdf = await renderA4Pdf(text);
+      const pdf = await renderA4Pdf(text, await loadHandwritingFont());
       self.postMessage({ kind: "result", requestId: event.data.requestId, text, pdf }, { transfer: [pdf.buffer] });
     } else {
-      const pdf = await renderA4Pdf(event.data.text);
+      const pdf = await renderA4Pdf(event.data.text, await loadHandwritingFont());
       self.postMessage({ kind: "result", requestId: event.data.requestId, pdf }, { transfer: [pdf.buffer] });
     }
   } catch (error) {

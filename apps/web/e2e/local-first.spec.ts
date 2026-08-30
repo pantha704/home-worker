@@ -59,3 +59,35 @@ test("extracts every source page in order", async ({ page }) => {
   );
   expect(apiRequests).toEqual([]);
 });
+
+test("keeps review and handwriting preview usable on a narrow phone", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto("/");
+  await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
+  await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
+  await expect(page).toHaveURL(/\/project\?id=local_/);
+
+  const editor = page.getByRole("textbox", { name: /review extracted text/i });
+  const preview = page.getByLabel(/handwritten A4 preview/i);
+  await expect(editor).toBeVisible();
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText(/homeworker/i);
+  await page.evaluate(() => document.fonts.load('18px "Ink Scholar"'));
+  expect(await page.evaluate(() => document.fonts.check('18px "Ink Scholar"'))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  const editorBox = await editor.boundingBox();
+  const labelBox = await page.getByText("Review extracted text", { exact: true }).boundingBox();
+  const titleBox = await page.locator(".project-title-group").boundingBox();
+  const homeBox = await page.getByRole("link", { name: "Home" }).boundingBox();
+  expect(editorBox?.width).toBeLessThanOrEqual(332);
+  expect((labelBox?.y ?? 0) + (labelBox?.height ?? 0)).toBeLessThanOrEqual(editorBox?.y ?? 0);
+  expect((titleBox?.x ?? 0) + (titleBox?.width ?? 0)).toBeLessThanOrEqual(homeBox?.x ?? 0);
+  for (const box of [editorBox, labelBox, titleBox, homeBox, await preview.boundingBox()]) {
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+  }
+  expect(await preview.evaluate((element) => getComputedStyle(element.querySelector("p")!).fontFamily)).toContain("Ink Scholar");
+  expect(await page.getByRole("link", { name: "Home" }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThan(0);
+});

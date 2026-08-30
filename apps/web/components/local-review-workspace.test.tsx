@@ -33,4 +33,16 @@ describe("LocalReviewWorkspace", () => {
     expect(updateBrowserProject).toHaveBeenCalledWith("local_42", 1, "Reviewed wording");
     expect(await screen.findByText(/revision 2/i)).toBeInTheDocument();
   });
+
+  it("regenerates an existing project's PDF without requiring a fake text edit", async () => {
+    vi.mocked(browserRepository).mockReturnValue({ get: vi.fn().mockResolvedValue(project) } as never);
+    vi.mocked(updateBrowserProject).mockResolvedValue({ ...project, revision: 2 });
+    const user = userEvent.setup();
+    render(<LocalReviewWorkspace projectId="local_42" />);
+
+    await user.click(await screen.findByRole("button", { name: /regenerate PDF/i }));
+
+    expect(updateBrowserProject).toHaveBeenCalledWith("local_42", 1, "Original wording");
+    expect(await screen.findByText(/revision 2/i)).toBeInTheDocument();
+  });
 });

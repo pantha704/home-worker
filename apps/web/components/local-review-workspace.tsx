@@ -34,7 +34,7 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   async function save() {
-    if (!project || draft === project.text) return;
+    if (!project) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -62,7 +62,12 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
   return (
     <main className="project-app">
       <header className="project-toolbar">
-        <div><span className="eyebrow">Browser-local project</span><h1>{project.filename}</h1><small>Revision {project.revision} · documents never leave this browser</small></div>
+        <div className="toolbar-left">
+          <div className="project-title-group">
+            <strong>{project.filename}</strong>
+            <span>Revision {project.revision} · private to this browser</span>
+          </div>
+        </div>
         <Link className="button button-ghost" href="/">Home</Link>
       </header>
       <section className="review-layout">
@@ -72,14 +77,17 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
           <label htmlFor="local-review-text">Review extracted text</label>
           <textarea id="local-review-text" onChange={(event) => setDraft(event.target.value)} rows={18} value={draft} />
           {error ? <p className="mutation-error" role="alert">{error}</p> : null}
-          <button className="button button-primary" disabled={busy || draft === project.text || !draft.trim()} onClick={() => void save()} type="button">
-            {busy ? "Saving…" : "Save revision"}
+          <button className="button button-primary" disabled={busy || !draft.trim()} onClick={() => void save()} type="button">
+            {busy ? "Generating…" : draft === project.text ? "Regenerate PDF" : "Save revision"}
           </button>
         </article>
         <aside className="preview-panel">
-          <span className="eyebrow">Verified local output</span>
-          <h2>A4 export</h2>
-          <p>The dedicated worker generated this revision from the reviewed text. Scanned PDFs fail closed until browser OCR is enabled.</p>
+          <span className="eyebrow">A4 handwriting preview</span>
+          <h2>First-page preview</h2>
+          <div aria-label="Handwritten A4 preview" className="notebook-preview">
+            <p>{draft || "Your reviewed text will appear here."}</p>
+          </div>
+          <p className="preview-help">This preview follows the handwriting, spacing, and ruled-paper style of the export. Save a revision to regenerate the downloadable PDF.</p>
           <button className="button button-primary button-wide" onClick={() => void downloadPdf()} type="button">Download A4 PDF</button>
           <button className="button button-secondary button-wide" onClick={() => void exportArchive()} type="button">Export .homeworker backup</button>
         </aside>
