@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:pages": "NEXT_PUBLIC_STATIC_EXPORT=1 next build && NEXT_PUBLIC_STATIC_EXPORT=1 node scripts/write-cloudflare-headers.mjs",
     "build:hosted": "NEXT_PUBLIC_RUNTIME_MODE=hosted next build && node scripts/write-cloudflare-headers.mjs",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",

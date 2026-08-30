@@ -12,8 +12,9 @@ function origin(name) {
   return parsed.origin;
 }
 
-const api = origin("NEXT_PUBLIC_API_BASE_URL");
-const supabase = origin("NEXT_PUBLIC_SUPABASE_URL");
+const localOnly = process.env.NEXT_PUBLIC_STATIC_EXPORT === "1";
+const api = localOnly ? null : origin("NEXT_PUBLIC_API_BASE_URL");
+const supabase = localOnly ? null : origin("NEXT_PUBLIC_SUPABASE_URL");
 
 async function htmlFiles(directory) {
   const paths = [];
@@ -40,7 +41,7 @@ if (scriptHashes.size === 0) throw new Error("The hosted export has no inline sc
 const policy = [
   "default-src 'self'",
   "base-uri 'self'",
-  `connect-src 'self' ${api} ${supabase}`,
+  `connect-src 'self'${localOnly ? "" : ` ${api} ${supabase}`}`,
   "font-src 'self'",
   "form-action 'self'",
   "frame-src 'none'",
