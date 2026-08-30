@@ -41,7 +41,25 @@ describe("browser-local safety gates", () => {
     expect(() => validateLocalPdfSource(new Uint8Array(MAX_UPLOAD_BYTES + 1))).toThrow("25 MB");
   });
 
-  it("rejects malformed worker responses immediately", async () => {
+  it("ignores non-protocol worker control messages until the deadline", async () => {
+    vi.useFakeTimers();
+    const worker = {
+      onmessage: null,
+      onerror: null,
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    const pending = requestLocalWorker("render", "text", 50, () => worker);
+    const rejection = expect(pending).rejects.toThrow("timed out");
+    worker.onmessage?.({ data: { sourceName: "webpack", action: "building" } } as MessageEvent);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(50);
+    await rejection;
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("rejects malformed worker protocol responses immediately", async () => {
     vi.useFakeTimers();
     const worker = {
       onmessage: null,

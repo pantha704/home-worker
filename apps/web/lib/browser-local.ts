@@ -102,6 +102,7 @@ export function requestLocalWorker(
     }, timeoutMs);
     worker.onmessage = (event: MessageEvent<WorkerResult | WorkerFailure | unknown>) => {
       const response = event.data;
+      if (response === null || typeof response !== "object" || !("kind" in response)) return;
       if (!isWorkerResponse(response)) {
         window.clearTimeout(timeout);
         worker.terminate();
