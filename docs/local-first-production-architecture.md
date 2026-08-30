@@ -1,6 +1,6 @@
 # Local-first production architecture
 
-Status: accepted direction; first one-page text-layer PDF proof implemented on `main`
+Status: accepted direction; ordered multi-page text-layer PDF processing implemented on `main`
 
 ## Decision
 

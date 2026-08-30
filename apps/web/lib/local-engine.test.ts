@@ -4,7 +4,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { WorkerMessageHandler } from "pdfjs-dist/legacy/build/pdf.worker.mjs";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { extractTextPage, renderA4Pdf } from "@/lib/local-engine";
+import { extractTextPages, renderA4Pdf } from "@/lib/local-engine";
 
 beforeAll(() => {
   Object.assign(globalThis, { pdfjsWorker: { WorkerMessageHandler } });
@@ -33,19 +33,41 @@ describe("browser-local PDF engine", () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = () => { throw new Error("network forbidden"); };
     try {
-      const result = await extractTextPage(await textPdf("Local only notes"));
-      expect(result).toMatchObject({ pageNumber: 1, text: "Local only notes" });
+      const result = await extractTextPages(await textPdf("Local only notes"));
+      expect(result).toEqual([{ pageNumber: 1, text: "Local only notes" }]);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it("rejects scanned or multi-page PDFs instead of pretending OCR succeeded", async () => {
+  it("extracts every text-layer page in source order", async () => {
     const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    for (const text of ["First page marker", "Second page marker", "Third page marker"]) {
+      const page = pdf.addPage([400, 600]);
+      page.drawText(text, { x: 40, y: 540, size: 16, font });
+    }
+
+    await expect(extractTextPages(await pdf.save())).resolves.toEqual([
+      { pageNumber: 1, text: "First page marker" },
+      { pageNumber: 2, text: "Second page marker" },
+      { pageNumber: 3, text: "Third page marker" },
+    ]);
+  });
+
+  it("rejects oversized page counts before extracting content", async () => {
+    const pdf = await PDFDocument.create();
+    for (let page = 0; page < 101; page += 1) pdf.addPage();
+    await expect(extractTextPages(await pdf.save())).rejects.toThrow("100 pages");
+  });
+
+  it("rejects a PDF when any page has no usable text layer", async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const textPage = pdf.addPage();
+    textPage.drawText("Usable", { x: 40, y: 700, size: 16, font });
     pdf.addPage();
-    await expect(extractTextPage(await pdf.save())).rejects.toThrow("text layer");
-    pdf.addPage();
-    await expect(extractTextPage(await pdf.save())).rejects.toThrow("one-page");
+    await expect(extractTextPages(await pdf.save())).rejects.toThrow("Page 2 has no usable text layer");
   });
 
   it("renders reviewed text into a real A4 PDF", async () => {

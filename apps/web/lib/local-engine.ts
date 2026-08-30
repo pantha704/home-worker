@@ -7,7 +7,7 @@ GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 export interface ExtractedTextPage {
-  pageNumber: 1;
+  pageNumber: number;
   text: string;
 }
 
@@ -17,22 +17,33 @@ const HORIZONTAL_MARGIN = 54;
 const FIRST_BASELINE = 787;
 const BOTTOM_MARGIN = 40;
 const LINE_HEIGHT = 14.5;
+const MAX_SOURCE_PAGES = 100;
 
-export async function extractTextPage(source: Uint8Array): Promise<ExtractedTextPage> {
+export async function extractTextPages(
+  source: Uint8Array,
+  onPage?: (pageNumber: number, totalPages: number) => void,
+): Promise<ExtractedTextPage[]> {
   const document = await getDocument({
     data: source.slice(),
     isEvalSupported: false,
     useWorkerFetch: false,
   }).promise;
-  if (document.numPages !== 1) throw new Error("The local preview supports one-page PDFs for now.");
-  const content = await (await document.getPage(1)).getTextContent();
-  const text = content.items
-    .filter((item): item is typeof item & { str: string } => "str" in item)
-    .map((item) => item.str.trim())
-    .filter(Boolean)
-    .join(" ");
-  if (!text) throw new Error("This PDF has no usable text layer; browser OCR is not enabled yet.");
-  return { pageNumber: 1, text };
+  if (document.numPages > MAX_SOURCE_PAGES) {
+    throw new Error(`PDFs with more than ${MAX_SOURCE_PAGES} pages are not supported.`);
+  }
+  const pages: ExtractedTextPage[] = [];
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const content = await (await document.getPage(pageNumber)).getTextContent();
+    const text = content.items
+      .filter((item): item is typeof item & { str: string } => "str" in item)
+      .map((item) => item.str.trim())
+      .filter(Boolean)
+      .join(" ");
+    if (!text) throw new Error(`Page ${pageNumber} has no usable text layer; browser OCR is not enabled yet.`);
+    pages.push({ pageNumber, text });
+    onPage?.(pageNumber, document.numPages);
+  }
+  return pages;
 }
 
 export async function renderA4Pdf(text: string): Promise<Uint8Array> {

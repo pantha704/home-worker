@@ -53,6 +53,61 @@ describe("UploadDropzone", () => {
     expect(push).toHaveBeenCalledWith("/project?id=local_42");
   });
 
+  it("offers cancellation while local processing is active", async () => {
+    vi.mocked(createBrowserProject).mockImplementation((_file: File, options?: { signal?: AbortSignal; onProcessing?: () => void }) => new Promise<never>((_resolve, reject) => {
+      options?.onProcessing?.();
+      options?.signal?.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+    }));
+    const user = userEvent.setup();
+    render(<UploadDropzone />);
+    await user.upload(screen.getByLabelText(/drop your notes/i), new File(["%PDF-1.7"], "large.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: /turn into handwritten notes/i }));
+    const cancel = screen.getByRole("button", { name: /cancel processing/i });
+    expect(cancel).toBeEnabled();
+    await user.click(cancel);
+    expect(await screen.findByRole("status")).toHaveTextContent(/cancelled.*not saved/i);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("removes cancellation at the persistence point of no return", async () => {
+    vi.mocked(createBrowserProject).mockImplementation((_file, options) => {
+      options?.onProcessing?.();
+      options?.onFinalizing?.();
+      return new Promise(() => {});
+    });
+    const user = userEvent.setup();
+    render(<UploadDropzone />);
+    await user.upload(screen.getByLabelText(/drop your notes/i), new File(["%PDF-1.7"], "large.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: /turn into handwritten notes/i }));
+    expect(screen.queryByRole("button", { name: /cancel processing/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /finalizing/i })).toBeDisabled();
+  });
+
+  it("cancels processing when the dropzone unmounts", async () => {
+    let signal: AbortSignal | undefined;
+    vi.mocked(createBrowserProject).mockImplementation((_file, options) => {
+      signal = options?.signal;
+      options?.onProcessing?.();
+      return new Promise(() => {});
+    });
+    const user = userEvent.setup();
+    const view = render(<UploadDropzone />);
+    await user.upload(screen.getByLabelText(/drop your notes/i), new File(["%PDF-1.7"], "large.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: /turn into handwritten notes/i }));
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("does not offer cancellation before the local worker starts", async () => {
+    vi.mocked(createBrowserProject).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    render(<UploadDropzone />);
+    await user.upload(screen.getByLabelText(/drop your notes/i), new File(["%PDF-1.7"], "large.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: /turn into handwritten notes/i }));
+    expect(screen.queryByRole("button", { name: /cancel processing/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /preparing/i })).toBeDisabled();
+  });
+
   it("restores a portable local archive", async () => {
     vi.mocked(importBrowserArchive).mockResolvedValue({
       id: "local_restored", filename: "restored.pdf", mimeType: "application/pdf", revision: 1,

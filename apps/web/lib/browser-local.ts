@@ -8,17 +8,39 @@ interface StorageGate {
 
 interface WorkerResult {
   kind: "result";
+  requestId: string;
   text?: string;
   pdf: Uint8Array;
 }
 
-interface WorkerFailure { kind: "error"; error: string }
+interface WorkerFailure { kind: "error"; requestId: string; error: string }
+interface WorkerProgress { kind: "progress"; requestId: string; completed: number; total: number }
+
+interface WorkerRequestOptions {
+  timeoutMs?: number;
+  createWorker?: () => Worker;
+  requestId?: string;
+  signal?: AbortSignal;
+  onProgress?: (progress: { completed: number; total: number }) => void;
+  onProcessing?: () => void;
+  onFinalizing?: () => void;
+}
 
 function isWorkerResponse(value: unknown): value is WorkerResult | WorkerFailure {
   if (value === null || typeof value !== "object" || !("kind" in value)) return false;
+  if (!("requestId" in value) || typeof value.requestId !== "string") return false;
   if (value.kind === "error") return "error" in value && typeof value.error === "string";
   return value.kind === "result" && "pdf" in value
     && Object.prototype.toString.call(value.pdf) === "[object Uint8Array]";
+}
+
+function isWorkerProgress(value: unknown): value is WorkerProgress {
+  return value !== null && typeof value === "object"
+    && "kind" in value && value.kind === "progress"
+    && "requestId" in value && typeof value.requestId === "string"
+    && "completed" in value && typeof value.completed === "number" && Number.isInteger(value.completed)
+    && "total" in value && typeof value.total === "number" && Number.isInteger(value.total)
+    && value.completed >= 0 && value.total > 0 && value.completed <= value.total;
 }
 
 const DB_NAME = "homeworker-local-v1";
@@ -91,53 +113,76 @@ export function browserRepository(): LocalProjectRepository {
 export function requestLocalWorker(
   action: "process" | "render",
   payload: Uint8Array | string,
-  timeoutMs = WORKER_TIMEOUT_MS,
-  createWorker = () => new Worker(new URL("../workers/local-document.worker.ts", import.meta.url), { type: "module" }),
+  options: WorkerRequestOptions = {},
 ): Promise<WorkerResult> {
   return new Promise((resolve, reject) => {
+    const requestId = options.requestId ?? crypto.randomUUID();
+    const createWorker = options.createWorker
+      ?? (() => new Worker(new URL("../workers/local-document.worker.ts", import.meta.url), { type: "module" }));
     const worker = createWorker();
-    const timeout = window.setTimeout(() => {
+    let settled = false;
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", abort);
       worker.terminate();
-      reject(new Error("Local document processing timed out."));
-    }, timeoutMs);
-    worker.onmessage = (event: MessageEvent<WorkerResult | WorkerFailure | unknown>) => {
+      operation();
+    };
+    const abort = () => finish(() => reject(new Error("Local document processing was cancelled.")));
+    const timeout = window.setTimeout(() => {
+      finish(() => reject(new Error("Local document processing timed out.")));
+    }, options.timeoutMs ?? WORKER_TIMEOUT_MS);
+    worker.onmessage = (event: MessageEvent<WorkerResult | WorkerFailure | WorkerProgress | unknown>) => {
       const response = event.data;
       if (response === null || typeof response !== "object" || !("kind" in response)) return;
-      if (!isWorkerResponse(response)) {
-        window.clearTimeout(timeout);
-        worker.terminate();
-        reject(new Error("The local document worker returned an invalid response."));
+      if ("requestId" in response && typeof response.requestId === "string" && response.requestId !== requestId) return;
+      if (isWorkerProgress(response)) {
+        if (response.requestId === requestId) {
+          options.onProgress?.({ completed: response.completed, total: response.total });
+        }
         return;
       }
-      window.clearTimeout(timeout);
-      worker.terminate();
-      if (response.kind === "error") reject(new Error(response.error));
-      else resolve(response);
+      if (!isWorkerResponse(response)) {
+        finish(() => reject(new Error("The local document worker returned an invalid response.")));
+        return;
+      }
+      if (response.requestId !== requestId) return;
+      if (response.kind === "error") finish(() => reject(new Error(response.error)));
+      else finish(() => resolve(response));
     };
     worker.onerror = () => {
-      window.clearTimeout(timeout);
-      worker.terminate();
-      reject(new Error("The local document worker stopped unexpectedly."));
+      finish(() => reject(new Error("The local document worker stopped unexpectedly.")));
     };
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) {
+      abort();
+      return;
+    }
     if (payload instanceof Uint8Array) {
       const copy = payload.slice();
-      worker.postMessage({ action, source: copy }, [copy.buffer]);
+      worker.postMessage({ action, requestId, source: copy }, [copy.buffer]);
     } else {
-      worker.postMessage({ action, text: payload });
+      worker.postMessage({ action, requestId, text: payload });
     }
   });
 }
 
-export async function createBrowserProject(file: File): Promise<LocalProject> {
+export async function createBrowserProject(
+  file: File,
+  options: Pick<WorkerRequestOptions, "signal" | "onProgress" | "onProcessing" | "onFinalizing"> = {},
+): Promise<LocalProject> {
   if (file.type !== "application/pdf") throw new Error("The browser-local preview currently supports PDF files only.");
   const source = new Uint8Array(await file.arrayBuffer());
   validateLocalPdfSource(source);
   await ensureStorageCapacity(source.length);
   return withProjectLock("create", async () => {
-    const result = await requestLocalWorker("process", source);
+    options.onProcessing?.();
+    const result = await requestLocalWorker("process", source, options);
     if (typeof result.text !== "string" || result.text.trim() === "") {
       throw new Error(`The PDF worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
     }
+    options.onFinalizing?.();
     return browserRepository().create({
       filename: file.name,
       mimeType: "application/pdf",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AuthPanel } from "@/components/auth-panel";
@@ -16,10 +16,11 @@ import {
   validateUpload,
 } from "@/lib/validation";
 
-type UploadState = "idle" | "selected" | "uploading" | "error";
+type UploadState = "idle" | "selected" | "preparing" | "uploading" | "finalizing" | "error";
 
 export function UploadDropzone() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const processingRef = useRef<AbortController>(null);
   const [state, setState] = useState<UploadState>("idle");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -27,6 +28,8 @@ export function UploadDropzone() {
   const router = useRouter();
   const { hosted, loading, session } = useAuth();
   const maxBytes = hosted ? HOSTED_MAX_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
+
+  useEffect(() => () => processingRef.current?.abort(), []);
 
   function selectFile(file: File | undefined) {
     if (!file) return;
@@ -45,16 +48,30 @@ export function UploadDropzone() {
   async function startUpload() {
     if (!selectedFile || state === "uploading") return;
     const controller = new AbortController();
-    setState("uploading");
-    setMessage(hosted ? "Uploading securely and checking the document…" : "Processing privately in this browser…");
+    processingRef.current = controller;
+    setState("preparing");
+    setMessage(hosted ? "Uploading securely and checking the document…" : "Preparing private browser processing…");
 
     try {
       const project = hosted
         ? await createProject(selectedFile, controller.signal)
-        : await createBrowserProject(selectedFile);
+        : await createBrowserProject(selectedFile, {
+            signal: controller.signal,
+            onProcessing: () => setState("uploading"),
+            onProgress: ({ completed, total }) => setMessage(`Processing page ${completed} of ${total}…`),
+            onFinalizing: () => {
+              setState("finalizing");
+              setMessage("Finalizing local project…");
+            },
+          });
       rememberProject({ id: project.id, filename: project.filename, updatedAt: project.updatedAt });
       router.push(`/project?id=${encodeURIComponent(project.id)}`);
     } catch (error) {
+      if (controller.signal.aborted) {
+        setMessage("Processing cancelled. Your source file was not saved.");
+        setState("selected");
+        return;
+      }
       const detail =
         error instanceof HomeworkerApiError
           ? error.message
@@ -65,7 +82,13 @@ export function UploadDropzone() {
               : "This browser could not process the document locally.";
       setMessage(detail);
       setState("error");
+    } finally {
+      if (processingRef.current === controller) processingRef.current = null;
     }
+  }
+
+  function cancelProcessing() {
+    processingRef.current?.abort();
   }
 
   function reset() {
@@ -150,11 +173,11 @@ export function UploadDropzone() {
 
       <button
         className="button button-primary button-wide"
-        disabled={!selectedFile || state === "uploading"}
-        onClick={startUpload}
+        disabled={!selectedFile || state === "preparing" || state === "finalizing"}
+        onClick={state === "uploading" ? cancelProcessing : startUpload}
         type="button"
       >
-        {state === "uploading" ? <><span className="spinner" /> Creating your project…</> : "Turn into handwritten notes"}
+        {state === "uploading" ? "Cancel processing" : state === "preparing" ? "Preparing…" : state === "finalizing" ? "Finalizing…" : "Turn into handwritten notes"}
       </button>
 
       <p className="upload-assurance"><span>✓</span> Your wording stays unchanged until you edit it.</p>

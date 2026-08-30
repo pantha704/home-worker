@@ -49,7 +49,7 @@ describe("browser-local safety gates", () => {
       postMessage: vi.fn(),
       terminate: vi.fn(),
     } as unknown as Worker;
-    const pending = requestLocalWorker("render", "text", 50, () => worker);
+    const pending = requestLocalWorker("render", "text", { timeoutMs: 50, createWorker: () => worker });
     const rejection = expect(pending).rejects.toThrow("timed out");
     worker.onmessage?.({ data: { sourceName: "webpack", action: "building" } } as MessageEvent);
     expect(worker.terminate).not.toHaveBeenCalled();
@@ -67,7 +67,7 @@ describe("browser-local safety gates", () => {
       postMessage: vi.fn(),
       terminate: vi.fn(),
     } as unknown as Worker;
-    const pending = requestLocalWorker("render", "text", 50, () => worker);
+    const pending = requestLocalWorker("render", "text", { timeoutMs: 50, createWorker: () => worker });
     const rejection = expect(pending).rejects.toThrow("invalid response");
     worker.onmessage?.({ data: { kind: "result" } } as MessageEvent);
     await rejection;
@@ -83,11 +83,93 @@ describe("browser-local safety gates", () => {
       postMessage: vi.fn(),
       terminate: vi.fn(),
     } as unknown as Worker;
-    const pending = requestLocalWorker("process", new Uint8Array([0x25, 0x50, 0x44, 0x46]), 50, () => worker);
+    const pending = requestLocalWorker("process", new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+      timeoutMs: 50,
+      createWorker: () => worker,
+    });
     const rejection = expect(pending).rejects.toThrow("timed out");
     await vi.advanceTimersByTimeAsync(50);
     await rejection;
     expect(worker.terminate).toHaveBeenCalledOnce();
     vi.useRealTimers();
+  });
+
+  it("reports matching progress and ignores stale replies", async () => {
+    vi.useFakeTimers();
+    const onProgress = vi.fn();
+    const worker = {
+      onmessage: null,
+      onerror: null,
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    const pending = requestLocalWorker("render", "text", {
+      timeoutMs: 50,
+      createWorker: () => worker,
+      requestId: "current",
+      onProgress,
+    });
+    worker.onmessage?.({ data: { kind: "progress", requestId: "stale", completed: 1, total: 2 } } as MessageEvent);
+    worker.onmessage?.({ data: { kind: "progress", requestId: "current", completed: 1, total: 2 } } as MessageEvent);
+    expect(onProgress).toHaveBeenCalledOnce();
+    expect(onProgress).toHaveBeenCalledWith({ completed: 1, total: 2 });
+    const rejection = expect(pending).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(50);
+    await rejection;
+    vi.useRealTimers();
+  });
+
+  it("ignores malformed stale terminal replies", async () => {
+    vi.useFakeTimers();
+    const worker = {
+      onmessage: null,
+      onerror: null,
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    const pending = requestLocalWorker("render", "text", {
+      timeoutMs: 50,
+      createWorker: () => worker,
+      requestId: "current",
+    });
+    worker.onmessage?.({ data: { kind: "result", requestId: "stale", pdf: "invalid" } } as MessageEvent);
+    const rejection = expect(pending).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(50);
+    await rejection;
+    vi.useRealTimers();
+  });
+
+  it("terminates once after a matching result and clears the deadline", async () => {
+    vi.useFakeTimers();
+    const worker = {
+      onmessage: null,
+      onerror: null,
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    const pending = requestLocalWorker("render", "text", {
+      timeoutMs: 50,
+      createWorker: () => worker,
+      requestId: "current",
+    });
+    worker.onmessage?.({ data: { kind: "result", requestId: "current", pdf: new Uint8Array([1]) } } as MessageEvent);
+    await expect(pending).resolves.toMatchObject({ requestId: "current" });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("terminates processing when aborted", async () => {
+    const controller = new AbortController();
+    const worker = {
+      onmessage: null,
+      onerror: null,
+      postMessage: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    const pending = requestLocalWorker("render", "text", { createWorker: () => worker, signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(worker.terminate).toHaveBeenCalledOnce();
   });
 });
