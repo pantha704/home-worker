@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.14
 
-FROM node:24.18.0-alpine AS dependencies
+FROM node:26.8.1-alpine AS dependencies
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=${PNPM_HOME}:${PATH}
@@ -25,7 +25,7 @@ COPY apps/web apps/web
 COPY packages/contracts packages/contracts
 RUN mkdir -p apps/web/public && pnpm --filter @homeworker/web build
 
-FROM node:24.18.0-alpine AS runtime
+FROM node:26.8.1-alpine AS runtime
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
