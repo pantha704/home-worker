@@ -84,4 +84,31 @@ describe("local project repository", () => {
     archive.project.mimeType = "image/gif";
     await expect(repo.importArchive(new TextEncoder().encode(JSON.stringify(archive)))).rejects.toThrow("Unsupported Homeworker archive");
   });
+
+  it("saves, resumes, and clears a processing checkpoint without creating a project", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    const digest = "abc123";
+    expect(await repo.getCheckpoint(digest)).toBeUndefined();
+    await repo.saveCheckpoint({
+      digest,
+      filename: "notes.pdf",
+      mimeType: "application/pdf",
+      pages: ["FIRST_PAGE_MARKER"],
+      total: 3,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(await repo.getCheckpoint(digest)).toMatchObject({ pages: ["FIRST_PAGE_MARKER"], total: 3 });
+    await repo.saveCheckpoint({
+      digest,
+      filename: "notes.pdf",
+      mimeType: "application/pdf",
+      pages: ["FIRST_PAGE_MARKER", "SECOND_PAGE_MARKER"],
+      total: 3,
+      text: "FIRST_PAGE_MARKER\n\nSECOND_PAGE_MARKER",
+      updatedAt: new Date().toISOString(),
+    });
+    expect((await repo.getCheckpoint(digest))?.text).toContain("SECOND_PAGE_MARKER");
+    await repo.deleteCheckpoint(digest);
+    expect(await repo.getCheckpoint(digest)).toBeUndefined();
+  });
 });

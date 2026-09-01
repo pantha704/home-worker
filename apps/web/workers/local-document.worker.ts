@@ -20,28 +20,31 @@ function loadHandwritingFont(): Promise<Uint8Array> {
 }
 
 type Request =
-  | { action: "process"; requestId: string; source: Uint8Array }
+  | { action: "process"; requestId: string; source: Uint8Array; resumeFrom?: number; priorPages?: string[] }
   | { action: "render"; requestId: string; text: string };
 
-async function extractSource(source: Uint8Array, requestId: string): Promise<string> {
-  const mime = sniffSource(source);
+async function extractSource(request: Extract<Request, { action: "process" }>): Promise<string> {
+  const mime = sniffSource(request.source);
   const assets = browserOcrAssets(self.location.origin);
+  const prior = Array.isArray(request.priorPages) ? request.priorPages.filter((page) => typeof page === "string") : [];
   if (mime !== "application/pdf") {
-    self.postMessage({ kind: "progress", requestId, completed: 0, total: 1 });
-    const text = await extractImageText(source, assets);
-    self.postMessage({ kind: "progress", requestId, completed: 1, total: 1 });
+    if (prior.length > 0) return prior.join("\n\n");
+    self.postMessage({ kind: "progress", requestId: request.requestId, completed: 0, total: 1 });
+    const text = await extractImageText(request.source, assets);
+    self.postMessage({ kind: "progress", requestId: request.requestId, completed: 1, total: 1, text });
     return text;
   }
   try {
-    const pages = await extractTextPages(source, (completed, total) => {
-      self.postMessage({ kind: "progress", requestId, completed, total });
-    });
-    return pages.map((page) => page.text).join("\n\n");
+    const pages = await extractTextPages(request.source, (completed, total, text) => {
+      self.postMessage({ kind: "progress", requestId: request.requestId, completed, total, text });
+    }, request.resumeFrom ?? 1);
+    return [...prior, ...pages.map((page) => page.text)].join("\n\n");
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes("no usable text layer")) throw error;
-    self.postMessage({ kind: "progress", requestId, completed: 0, total: 1 });
-    const text = await extractImageText(await rasterizeFirstPdfPage(source), assets);
-    self.postMessage({ kind: "progress", requestId, completed: 1, total: 1 });
+    if (prior.length > 0) return prior.join("\n\n");
+    self.postMessage({ kind: "progress", requestId: request.requestId, completed: 0, total: 1 });
+    const text = await extractImageText(await rasterizeFirstPdfPage(request.source), assets);
+    self.postMessage({ kind: "progress", requestId: request.requestId, completed: 1, total: 1, text });
     return text;
   }
 }
@@ -49,7 +52,7 @@ async function extractSource(source: Uint8Array, requestId: string): Promise<str
 self.onmessage = async (event: MessageEvent<Request>) => {
   try {
     if (event.data.action === "process") {
-      const text = await extractSource(event.data.source, event.data.requestId);
+      const text = await extractSource(event.data);
       const pdf = await renderA4Pdf(text, await loadHandwritingFont());
       self.postMessage({ kind: "result", requestId: event.data.requestId, text, pdf }, { transfer: [pdf.buffer] });
     } else {

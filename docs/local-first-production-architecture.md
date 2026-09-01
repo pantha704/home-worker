@@ -1,6 +1,6 @@
 # Local-first production architecture
 
-Status: accepted direction; browser-local OCR for PNG/JPEG and one-page scans is implemented alongside ordered multi-page text-layer PDFs
+Status: accepted direction; browser-local OCR, page checkpoints, and Chrome/Firefox acceptance are implemented. Safari is not proven.
 
 ## Decision
 

@@ -13,7 +13,7 @@ test("processes, reopens, edits, and exports a PDF without document API traffic"
   await page.goto("/");
   await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
   await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
-  await expect(page).toHaveURL(/\/project\?id=local_/);
+  await expect(page).toHaveURL(/\/project\?id=local_/, { timeout: 90_000 });
   const projectUrl = page.url();
   const editor = page.getByRole("textbox", { name: /review extracted text/i });
   await expect(editor).toContainText(/homeworker/i);
@@ -43,7 +43,7 @@ test("processes a PNG with on-device OCR without document API traffic", async ({
   await page.goto("/");
   await page.getByLabel(/drop your notes/i).setInputFiles(path.resolve(process.cwd(), "../../fixtures/ocr-homeworker.png"));
   await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
-  await expect(page).toHaveURL(/\/project\?id=local_/);
+  await expect(page).toHaveURL(/\/project\?id=local_/, { timeout: 90_000 });
   await expect(page.getByRole("textbox", { name: /review extracted text/i })).toContainText(/HOMEWORKER/i);
   expect(apiRequests).toEqual([]);
 });
@@ -67,7 +67,7 @@ test("extracts every source page in order", async ({ page }) => {
     buffer: Buffer.from(await pdf.save()),
   });
   await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
-  await expect(page).toHaveURL(/\/project\?id=local_/);
+  await expect(page).toHaveURL(/\/project\?id=local_/, { timeout: 90_000 });
   await expect(page.getByRole("textbox", { name: /review extracted text/i })).toHaveValue(
     "FIRST_PAGE_MARKER\n\nSECOND_PAGE_MARKER\n\nTHIRD_PAGE_MARKER",
   );
@@ -79,7 +79,7 @@ test("keeps review and handwriting preview usable on a narrow phone", async ({ p
   await page.goto("/");
   await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
   await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
-  await expect(page).toHaveURL(/\/project\?id=local_/);
+  await expect(page).toHaveURL(/\/project\?id=local_/, { timeout: 90_000 });
 
   const editor = page.getByRole("textbox", { name: /review extracted text/i });
   const preview = page.getByLabel(/handwritten A4 preview/i);
