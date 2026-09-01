@@ -216,8 +216,7 @@ def confirm_project(
             block.id
             for page in updated.pages
             for block in page.blocks
-            if not block.reviewed
-            and (block.confidence < 0.9 or bool(block.warnings))
+            if not block.reviewed and (block.confidence < 0.9 or bool(block.warnings))
         ]
         if pending:
             raise InkError(

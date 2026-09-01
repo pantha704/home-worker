@@ -325,9 +325,14 @@ class ProjectRepository:
                     text("SELECT pg_advisory_xact_lock(hashtextextended(:owner_id, 0))"),
                     {"owner_id": owner_id},
                 )
-            project_count = session.scalar(
-                select(func.count()).select_from(ProjectRow).where(ProjectRow.owner_id == owner_id)
-            ) or 0
+            project_count = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(ProjectRow)
+                    .where(ProjectRow.owner_id == owner_id)
+                )
+                or 0
+            )
             if project_count >= self.max_projects:
                 raise InkError(
                     "PROJECT_QUOTA_EXCEEDED",
@@ -335,16 +340,22 @@ class ProjectRepository:
                     status_code=409,
                     details={"maxProjects": self.max_projects},
                 )
-            stored_bytes = session.scalar(
-                select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
-                    ProjectRow.owner_id == owner_id
+            stored_bytes = (
+                session.scalar(
+                    select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
+                        ProjectRow.owner_id == owner_id
+                    )
                 )
-            ) or 0
-            artifact_bytes = session.scalar(
-                select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
-                    ArtifactRow.owner_id == owner_id
+                or 0
+            )
+            artifact_bytes = (
+                session.scalar(
+                    select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
+                        ArtifactRow.owner_id == owner_id
+                    )
                 )
-            ) or 0
+                or 0
+            )
             if int(stored_bytes) + int(artifact_bytes) + source_size > self.max_storage_bytes:
                 raise InkError(
                     "STORAGE_QUOTA_EXCEEDED",
@@ -894,16 +905,22 @@ class ProjectRepository:
                     media_type=existing.media_type,
                     created_at=existing.created_at,
                 )
-            source_bytes = session.scalar(
-                select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
-                    ProjectRow.owner_id == artifact.owner_id
+            source_bytes = (
+                session.scalar(
+                    select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
+                        ProjectRow.owner_id == artifact.owner_id
+                    )
                 )
-            ) or 0
-            artifact_bytes = session.scalar(
-                select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
-                    ArtifactRow.owner_id == artifact.owner_id
+                or 0
+            )
+            artifact_bytes = (
+                session.scalar(
+                    select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
+                        ArtifactRow.owner_id == artifact.owner_id
+                    )
                 )
-            ) or 0
+                or 0
+            )
             if int(source_bytes) + int(artifact_bytes) + artifact.size > self.max_storage_bytes:
                 raise InkError(
                     "STORAGE_QUOTA_EXCEEDED",
