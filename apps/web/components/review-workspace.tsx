@@ -20,6 +20,7 @@ import {
   HomeworkerApiError,
   retryPages,
   saveBlob,
+  reviewBlock,
   updatePageText,
   updateProjectSettings,
 } from "@/lib/api";
@@ -98,6 +99,27 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
   const pages = project?.pages ?? [];
   const currentPage = pages[pageIndex] ?? pages[0];
   const draftText = currentPage ? (drafts[currentPage.number] ?? pagePlainText(currentPage)) : "";
+  const pendingReviewBlocks = flattenBlocks(pages).filter(
+    (block) => !block.reviewed && (block.confidence < 0.9 || block.warnings.length > 0),
+  );
+
+  async function approveBlock(blockId: string) {
+    if (!project) return;
+    setBusyAction(`block:${blockId}`);
+    setMutationError(null);
+    try {
+      const next = await reviewBlock(project.id, blockId, project.revision);
+      setProject(next);
+    } catch (error) {
+      if (isConflictError(error)) {
+        await recoverConflict("The document changed. Review this block again.");
+      } else {
+        setMutationError(error instanceof HomeworkerApiError ? error.message : "The block review could not be saved.");
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   async function recoverConflict(message: string) {
     try {
@@ -111,7 +133,7 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
   }
 
   async function saveCurrentPage() {
-    if (!project || !currentPage) return;
+    if (!project || !currentPage) return null;
     setBusyAction(`page:${currentPage.number}`);
     setMutationError(null);
     try {
@@ -122,12 +144,14 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
         delete copy[currentPage.number];
         return copy;
       });
+      return next;
     } catch (error) {
       if (isConflictError(error)) {
         await recoverConflict("A newer revision was loaded. Check this page and save again.");
       } else {
         setMutationError(error instanceof HomeworkerApiError ? error.message : "The page could not be saved.");
       }
+      return null;
     } finally {
       setBusyAction(null);
     }
@@ -185,11 +209,13 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
     setBusyAction("confirm");
     setMutationError(null);
     try {
+      let revision = project.revision;
       if (currentPage && (drafts[currentPage.number] ?? pagePlainText(currentPage)) !== pagePlainText(currentPage)) {
-        await saveCurrentPage();
+        const saved = await saveCurrentPage();
+        if (!saved) return;
+        revision = saved.revision;
       }
-      const latest = await getProject(project.id);
-      const next = await confirmProject(latest.id, latest.revision, flattenBlocks(latest.pages).map((block) => block.id));
+      const next = await confirmProject(project.id, revision);
       setProject(next);
       setStage("finalize");
     } catch (error) {
@@ -304,6 +330,7 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
             draftText={draftText}
             index={Math.min(pageIndex, pages.length - 1)}
             onDraftChange={(text) => setDrafts((current) => ({ ...current, [currentPage.number]: text }))}
+            onApproveBlock={(blockId) => void approveBlock(blockId)}
             onIndexChange={setPageIndex}
             onSave={() => void saveCurrentPage()}
             onToggleSelect={() => {
@@ -318,13 +345,19 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
             pageCount={pages.length}
             projectId={project.id}
             refreshing={busyAction === "retry"}
+            reviewingBlockId={busyAction?.startsWith("block:") ? busyAction.slice(6) : null}
             selected={selectedPages.has(currentPage.number)}
           />
           <div className="page-review-bar">
+            <span aria-live="polite" className="review-progress">
+              {pendingReviewBlocks.length === 0
+                ? "All uncertain blocks reviewed"
+                : `${pendingReviewBlocks.length} uncertain block${pendingReviewBlocks.length === 1 ? "" : "s"} remaining`}
+            </span>
             <button className="button button-secondary" disabled={selectedPages.size === 0 || busyAction === "retry"} onClick={() => void retrySelected()} type="button">
               {busyAction === "retry" ? "Re-extracting…" : `Retry ${selectedPages.size || ""} selected page${selectedPages.size === 1 ? "" : "s"}`}
             </button>
-            <button className="button button-primary" disabled={busyAction === "confirm" || pages.length === 0} onClick={() => void submitReview()} type="button">
+            <button className="button button-primary" disabled={busyAction !== null || pages.length === 0 || pendingReviewBlocks.length > 0} onClick={() => void submitReview()} type="button">
               {busyAction === "confirm" ? <><span className="spinner" /> Submitting…</> : <><CheckIcon size={17} /> Submit for handwriting</>}
             </button>
           </div>

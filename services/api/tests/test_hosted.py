@@ -140,15 +140,38 @@ def test_review_acknowledgements_are_enforced_by_server(tmp_path) -> None:
         incomplete = client.post(
             f"/v1/projects/{project_id}/confirm",
             headers=headers(mutation=True),
-            json={"expectedRevision": 2, "acknowledgedBlockIds": []},
+            json={"expectedRevision": 2},
         )
         assert incomplete.status_code == 409
         assert incomplete.json()["error"]["code"] == "REVIEW_INCOMPLETE"
 
-        confirmed = client.post(
+        bypass = client.post(
             f"/v1/projects/{project_id}/confirm",
             headers=headers(mutation=True),
             json={"expectedRevision": 2, "acknowledgedBlockIds": [block_id]},
+        )
+        assert bypass.status_code == 422
+
+        reviewed = client.post(
+            f"/v1/projects/{project_id}/blocks/{block_id}/review",
+            headers=headers(mutation=True),
+            json={"expectedRevision": 2},
+        )
+        assert reviewed.status_code == 200
+        assert reviewed.json()["pages"][0]["blocks"][0]["reviewed"] is True
+
+        repeated = client.post(
+            f"/v1/projects/{project_id}/blocks/{block_id}/review",
+            headers=headers(mutation=True),
+            json={"expectedRevision": 3},
+        )
+        assert repeated.status_code == 409
+        assert repeated.json()["error"]["code"] == "BLOCK_ALREADY_REVIEWED"
+
+        confirmed = client.post(
+            f"/v1/projects/{project_id}/confirm",
+            headers=headers(mutation=True),
+            json={"expectedRevision": 3},
         )
         assert confirmed.status_code == 200
         assert confirmed.json()["status"] == "ready"
@@ -159,12 +182,19 @@ def test_revision_exact_artifact_cache_and_manifest(tmp_path) -> None:
     with TestClient(create_app(settings, token_verifier=StaticTokenVerifier())) as client:
         project = upload(client)
         project_id = project["id"]
+        confirmed = client.post(
+            f"/v1/projects/{project_id}/confirm",
+            headers=headers(mutation=True),
+            json={"expectedRevision": 1},
+        )
+        assert confirmed.status_code == 200
+        ready_revision = confirmed.json()["revision"]
         first = client.get(
-            f"/v1/projects/{project_id}/export.pdf?revision=1",
+            f"/v1/projects/{project_id}/export.pdf?revision={ready_revision}",
             headers=headers(),
         )
         second = client.get(
-            f"/v1/projects/{project_id}/export.pdf?revision=1",
+            f"/v1/projects/{project_id}/export.pdf?revision={ready_revision}",
             headers=headers(),
         )
         assert first.status_code == 200
@@ -173,7 +203,7 @@ def test_revision_exact_artifact_cache_and_manifest(tmp_path) -> None:
         assert first.headers["X-Artifact-SHA256"] == digest
 
         manifest = client.get(
-            f"/v1/projects/{project_id}/manifest.json?revision=1&kind=handwritten_pdf",
+            f"/v1/projects/{project_id}/manifest.json?revision={ready_revision}&kind=handwritten_pdf",
             headers=headers(),
         )
         assert manifest.status_code == 200
@@ -184,15 +214,15 @@ def test_revision_exact_artifact_cache_and_manifest(tmp_path) -> None:
         changed = client.patch(
             f"/v1/projects/{project_id}/settings",
             headers=headers(mutation=True),
-            json={"expectedRevision": 1, "seed": 99},
+            json={"expectedRevision": ready_revision, "seed": 99},
         )
         assert changed.status_code == 200
         historical = client.get(
-            f"/v1/projects/{project_id}/export.pdf?revision=1",
+            f"/v1/projects/{project_id}/export.pdf?revision={ready_revision}",
             headers=headers(),
         )
         current = client.get(
-            f"/v1/projects/{project_id}/export.pdf?revision=2",
+            f"/v1/projects/{project_id}/export.pdf?revision={ready_revision + 1}",
             headers=headers(),
         )
         assert historical.content == first.content

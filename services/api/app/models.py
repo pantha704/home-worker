@@ -167,6 +167,10 @@ class BlockPatch(ApiModel):
         return value
 
 
+class BlockReviewRequest(ApiModel):
+    expected_revision: int = Field(ge=1)
+
+
 class PageTextPatch(ApiModel):
     text: str = Field(max_length=200_000)
     expected_revision: int = Field(ge=1)
@@ -214,16 +218,6 @@ class SettingsPatch(ApiModel):
 
 class ConfirmRequest(ApiModel):
     expected_revision: int = Field(ge=1)
-    acknowledged_block_ids: list[str] = Field(default_factory=list, max_length=10_000)
-
-    @field_validator("acknowledged_block_ids")
-    @classmethod
-    def require_unique_block_ids(cls, value: list[str]) -> list[str]:
-        if any(not block_id or len(block_id) > 100 for block_id in value):
-            raise ValueError("acknowledged block IDs must be between 1 and 100 characters")
-        if len(value) != len(set(value)):
-            raise ValueError("acknowledged block IDs must be unique")
-        return value
 
 
 class ArtifactManifest(ApiModel):

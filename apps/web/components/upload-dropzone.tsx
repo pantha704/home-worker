@@ -8,6 +8,7 @@ import { FileIcon, UploadIcon, WarningIcon } from "@/components/icons";
 import { useAuth } from "@/components/auth-provider";
 import { createProject, HomeworkerApiError } from "@/lib/api";
 import { createBrowserProject, importBrowserArchive } from "@/lib/browser-local";
+import { isBrowserPreviewMode } from "@/lib/config";
 import { rememberProject } from "@/lib/recent-projects";
 import {
   formatFileSize,
@@ -27,12 +28,19 @@ export function UploadDropzone() {
   const [isDragging, setIsDragging] = useState(false);
   const router = useRouter();
   const { hosted, loading, session } = useAuth();
+  const browserPreview = isBrowserPreviewMode();
   const maxBytes = hosted ? HOSTED_MAX_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
 
   useEffect(() => () => processingRef.current?.abort(), []);
 
   function selectFile(file: File | undefined) {
     if (!file) return;
+    if (browserPreview && file.type !== "application/pdf") {
+      setSelectedFile(null);
+      setMessage("Quick preview supports text-layer PDF files only. Run the full local application for PNG, JPEG, or scanned-document OCR.");
+      setState("error");
+      return;
+    }
     const validation = validateUpload(file, maxBytes);
     if (!validation.valid) {
       setSelectedFile(null);
@@ -50,12 +58,11 @@ export function UploadDropzone() {
     const controller = new AbortController();
     processingRef.current = controller;
     setState("preparing");
-    setMessage(hosted ? "Uploading securely and checking the document…" : "Preparing private browser processing…");
+    setMessage(browserPreview ? "Preparing private browser processing…" : "Sending the document to your local OCR service…");
 
     try {
-      const project = hosted
-        ? await createProject(selectedFile, controller.signal)
-        : await createBrowserProject(selectedFile, {
+      const project = browserPreview
+        ? await createBrowserProject(selectedFile, {
             signal: controller.signal,
             onProcessing: () => setState("uploading"),
             onProgress: ({ completed, total }) => setMessage(`Processing page ${completed} of ${total}…`),
@@ -63,7 +70,8 @@ export function UploadDropzone() {
               setState("finalizing");
               setMessage("Finalizing local project…");
             },
-          });
+          })
+        : await createProject(selectedFile, controller.signal);
       rememberProject({ id: project.id, filename: project.filename, updatedAt: project.updatedAt });
       router.push(`/project?id=${encodeURIComponent(project.id)}`);
     } catch (error) {
@@ -121,7 +129,7 @@ export function UploadDropzone() {
     <div className="upload-card" id="upload">
       <div className="upload-card-heading">
         <span className="eyebrow">Start with your source</span>
-        <span className={hosted ? "hosted-pill" : "local-pill"}><span /> {hosted ? "Private cloud" : "Runs locally"}</span>
+        <span className={hosted ? "hosted-pill" : "local-pill"}><span /> {hosted ? "Experimental hosted beta" : browserPreview ? "Quick PDF preview" : "Full local OCR"}</span>
       </div>
 
       <div
@@ -138,7 +146,7 @@ export function UploadDropzone() {
       >
         <input
           ref={inputRef}
-          accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+          accept={browserPreview ? ".pdf,application/pdf" : ".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"}
           className="sr-only"
           id="source-file"
           onChange={(event) => selectFile(event.target.files?.[0])}
@@ -159,7 +167,7 @@ export function UploadDropzone() {
             <span className="upload-icon"><UploadIcon size={27} /></span>
             <strong>Drop your notes here</strong>
             <span>or <u>choose a file</u> from your device</span>
-            <small id="upload-help">PDF, PNG, or JPG · Up to {Math.round(maxBytes / 1024 / 1024)} MB</small>
+            <small id="upload-help">{browserPreview ? "Text-layer PDF" : "PDF, PNG, or JPG"} · Up to {Math.round(maxBytes / 1024 / 1024)} MB</small>
           </label>
         )}
       </div>
@@ -181,7 +189,7 @@ export function UploadDropzone() {
       </button>
 
       <p className="upload-assurance"><span>✓</span> Your wording stays unchanged until you edit it.</p>
-      {!hosted ? (
+      {browserPreview ? (
         <label className="text-button" htmlFor="project-archive">
           Restore .homeworker backup
           <input

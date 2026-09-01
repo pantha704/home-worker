@@ -36,13 +36,14 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 
 def process_job(
     task: JobTask,
+    worker_id: str,
     repository: ProjectRepository,
     object_store: ObjectStore,
     settings: Settings,
 ) -> None:
     source = repository.get_source(task.owner_id, task.project_id)
     if source.project.status != ProjectStatus.PROCESSING:
-        repository.complete_job(task.id)
+        repository.complete_job(task.id, worker_id)
         return
 
     settings.work_root.mkdir(parents=True, exist_ok=True)
@@ -66,8 +67,8 @@ def process_job(
             task.project_id,
             source.project.revision,
             pages,
+            job_lease=(task.id, worker_id),
         )
-    repository.complete_job(task.id)
 
 
 def _record_final_failure(
@@ -110,10 +111,12 @@ def run_worker_once(
     if task is None:
         return False
     try:
-        process_job(task, repository, object_store, settings)
+        process_job(task, worker_id, repository, object_store, settings)
     except Exception as exc:
         logger.exception("document processing attempt failed", exc_info=exc)
-        failed = repository.retry_or_fail_job(task.id, str(exc), settings.job_max_attempts)
+        failed = repository.retry_or_fail_job(
+            task.id, worker_id, str(exc), settings.job_max_attempts
+        )
         if failed:
             _record_final_failure(task, repository, exc)
     return True

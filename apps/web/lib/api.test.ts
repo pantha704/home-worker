@@ -23,10 +23,9 @@ describe("API mutation contracts", () => {
 
   it("sends a project-level review confirmation", async () => {
     const fetchMock = mockJsonResponse();
-    await confirmProject("project-42", 7, ["block-1"]);
+    await confirmProject("project-42", 7);
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       expectedRevision: 7,
-      acknowledgedBlockIds: ["block-1"],
     });
   });
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -228,6 +230,8 @@ class ProjectRepository:
         schema: str = "homeworker",
         auto_create: bool = True,
         max_revisions: int = 60,
+        max_projects: int = 20,
+        max_storage_bytes: int = 100 * 1024 * 1024,
     ) -> None:
         path = _sqlite_path(database_url)
         if path is not None:
@@ -239,6 +243,9 @@ class ProjectRepository:
         self.schema = schema
         self.auto_create = auto_create
         self.max_revisions = max_revisions
+        self.max_projects = max_projects
+        self.max_storage_bytes = max_storage_bytes
+        self._sqlite_write_lock = threading.Lock()
         options = {"schema_translate_map": {SCHEMA_TOKEN: None if self.is_sqlite else schema}}
         engine_options: dict[str, Any] = {
             "connect_args": connect_args,
@@ -311,7 +318,41 @@ class ProjectRepository:
         idempotency_key: str | None = None,
     ) -> ProjectDocument:
         payload = project.model_dump(mode="json", by_alias=True)
-        with self.sessions.begin() as session:
+        lock = self._sqlite_write_lock if self.is_sqlite else nullcontext()
+        with lock, self.sessions.begin() as session:
+            if not self.is_sqlite:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:owner_id, 0))"),
+                    {"owner_id": owner_id},
+                )
+            project_count = session.scalar(
+                select(func.count()).select_from(ProjectRow).where(ProjectRow.owner_id == owner_id)
+            ) or 0
+            if project_count >= self.max_projects:
+                raise InkError(
+                    "PROJECT_QUOTA_EXCEEDED",
+                    "This account reached its project limit. Delete a project and retry.",
+                    status_code=409,
+                    details={"maxProjects": self.max_projects},
+                )
+            stored_bytes = session.scalar(
+                select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
+                    ProjectRow.owner_id == owner_id
+                )
+            ) or 0
+            artifact_bytes = session.scalar(
+                select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
+                    ArtifactRow.owner_id == owner_id
+                )
+            ) or 0
+            if int(stored_bytes) + int(artifact_bytes) + source_size > self.max_storage_bytes:
+                raise InkError(
+                    "STORAGE_QUOTA_EXCEEDED",
+                    "This account reached its private storage allowance. "
+                    "Delete a project and retry.",
+                    status_code=409,
+                    details={"maxBytes": self.max_storage_bytes},
+                )
             project_row = ProjectRow(
                 id=project.id,
                 owner_id=owner_id,
@@ -480,6 +521,8 @@ class ProjectRepository:
         project_id: str,
         expected_revision: int,
         transform: Callable[[ProjectDocument], ProjectDocument],
+        *,
+        job_lease: tuple[str, str] | None = None,
     ) -> ProjectDocument:
         if expected_revision >= self.max_revisions:
             raise InkError(
@@ -488,7 +531,8 @@ class ProjectRepository:
                 status_code=409,
                 details={"maxRevisions": self.max_revisions},
             )
-        with self.sessions.begin() as session:
+        lock = self._sqlite_write_lock if self.is_sqlite else nullcontext()
+        with lock, self.sessions.begin() as session:
             query = select(ProjectRow).where(
                 ProjectRow.id == project_id,
                 ProjectRow.owner_id == owner_id,
@@ -508,6 +552,23 @@ class ProjectRepository:
                         "currentRevision": row.revision,
                     },
                 )
+
+            job_row: JobRow | None = None
+            if job_lease is not None:
+                job_id, worker_id = job_lease
+                job_row = session.get(JobRow, job_id)
+                if (
+                    job_row is None
+                    or job_row.project_id != project_id
+                    or job_row.owner_id != owner_id
+                    or job_row.status != "processing"
+                    or job_row.leased_by != worker_id
+                ):
+                    raise InkError(
+                        "JOB_LEASE_LOST",
+                        "This processing lease is no longer current.",
+                        status_code=409,
+                    )
 
             current = ProjectDocument.model_validate(row.document)
             updated_project = transform(current)
@@ -547,6 +608,11 @@ class ProjectRepository:
                     created_at=updated_project.updated_at,
                 )
             )
+            if job_row is not None:
+                job_row.status = "completed"
+                job_row.lease_expires_at = None
+                job_row.leased_by = None
+                job_row.updated_at = updated_project.updated_at
             try:
                 session.flush()
             except IntegrityError as exc:
@@ -558,13 +624,20 @@ class ProjectRepository:
             return updated_project
 
     def delete(self, owner_id: str, project_id: str, expected_revision: int) -> list[str]:
-        with self.sessions.begin() as session:
-            row = session.scalar(
-                select(ProjectRow).where(
-                    ProjectRow.id == project_id,
-                    ProjectRow.owner_id == owner_id,
+        lock = self._sqlite_write_lock if self.is_sqlite else nullcontext()
+        with lock, self.sessions.begin() as session:
+            if not self.is_sqlite:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:owner_id, 0))"),
+                    {"owner_id": owner_id},
                 )
+            query = select(ProjectRow).where(
+                ProjectRow.id == project_id,
+                ProjectRow.owner_id == owner_id,
             )
+            if not self.is_sqlite:
+                query = query.with_for_update()
+            row = session.scalar(query)
             if row is None:
                 raise _not_found()
             if row.revision != expected_revision:
@@ -651,7 +724,13 @@ class ProjectRepository:
         now = datetime.now(UTC)
         window_start = now.replace(minute=0, second=0, microsecond=0)
         expires_at = window_start + timedelta(hours=2)
-        with self.sessions.begin() as session:
+        lock = self._sqlite_write_lock if self.is_sqlite else nullcontext()
+        with lock, self.sessions.begin() as session:
+            if not self.is_sqlite:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:owner_id, 0))"),
+                    {"owner_id": owner_id},
+                )
             query = select(RateLimitRow).where(
                 RateLimitRow.owner_id == owner_id,
                 RateLimitRow.action == action,
@@ -713,20 +792,31 @@ class ProjectRepository:
                 attempts=row.attempts,
             )
 
-    def complete_job(self, job_id: str) -> None:
+    def complete_job(self, job_id: str, worker_id: str) -> bool:
         with self.sessions.begin() as session:
-            row = session.get(JobRow, job_id)
-            if row is not None:
-                row.status = "completed"
-                row.lease_expires_at = None
-                row.leased_by = None
-                row.updated_at = datetime.now(UTC)
+            result = session.execute(
+                update(JobRow)
+                .where(
+                    JobRow.id == job_id,
+                    JobRow.status == "processing",
+                    JobRow.leased_by == worker_id,
+                )
+                .values(
+                    status="completed",
+                    lease_expires_at=None,
+                    leased_by=None,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            return cast(CursorResult[Any], result).rowcount == 1
 
-    def retry_or_fail_job(self, job_id: str, message: str, max_attempts: int) -> bool:
+    def retry_or_fail_job(
+        self, job_id: str, worker_id: str, message: str, max_attempts: int
+    ) -> bool:
         now = datetime.now(UTC)
         with self.sessions.begin() as session:
             row = session.get(JobRow, job_id)
-            if row is None:
+            if row is None or row.status != "processing" or row.leased_by != worker_id:
                 return True
             row.last_error = message[:500]
             row.lease_expires_at = None
@@ -767,7 +857,21 @@ class ProjectRepository:
             )
 
     def record_artifact(self, artifact: ArtifactRecord) -> ArtifactRecord:
-        with self.sessions.begin() as session:
+        lock = self._sqlite_write_lock if self.is_sqlite else nullcontext()
+        with lock, self.sessions.begin() as session:
+            if not self.is_sqlite:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:owner_id, 0))"),
+                    {"owner_id": artifact.owner_id},
+                )
+            project_exists = session.scalar(
+                select(ProjectRow.id).where(
+                    ProjectRow.id == artifact.project_id,
+                    ProjectRow.owner_id == artifact.owner_id,
+                )
+            )
+            if project_exists is None:
+                raise _not_found()
             existing = session.get(
                 ArtifactRow,
                 {
@@ -789,6 +893,24 @@ class ProjectRepository:
                     size=existing.size,
                     media_type=existing.media_type,
                     created_at=existing.created_at,
+                )
+            source_bytes = session.scalar(
+                select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
+                    ProjectRow.owner_id == artifact.owner_id
+                )
+            ) or 0
+            artifact_bytes = session.scalar(
+                select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
+                    ArtifactRow.owner_id == artifact.owner_id
+                )
+            ) or 0
+            if int(source_bytes) + int(artifact_bytes) + artifact.size > self.max_storage_bytes:
+                raise InkError(
+                    "STORAGE_QUOTA_EXCEEDED",
+                    "This account reached its private storage allowance. "
+                    "Delete a project and retry.",
+                    status_code=409,
+                    details={"maxBytes": self.max_storage_bytes},
                 )
             session.add(
                 ArtifactRow(

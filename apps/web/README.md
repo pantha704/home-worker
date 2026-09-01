@@ -1,8 +1,8 @@
 # Homeworker web
 
-The web app is the transparent review and print workspace for Homeworker. It uploads a PDF or supported image, shows extracted blocks with provenance and confidence, requires human review of uncertainty, applies one of three licensed handwriting personas, previews exact A4 output, and unlocks downloads only after review is confirmed.
+The web app has three explicit runtime profiles. `local-service` is the full local FastAPI/Tesseract workflow for PDF, PNG, and JPEG. `browser-preview` is a quick, browser-only preview for text-layer PDFs and does not provide OCR or full evidence/review parity. `hosted` is an experimental invite-only beta that requires live acceptance before use beyond testers.
 
-No paid service or API key is required for local mode. Hosted mode statically exports the site for Cloudflare Pages Free and uses Supabase Free magic-link authentication before calling the owner-scoped API.
+No paid service or API key is required for full local mode. Hosted mode statically exports the site for Cloudflare Pages Free and uses Supabase Free magic-link authentication before calling the owner-scoped API.
 
 ## Run locally
 
@@ -16,6 +16,8 @@ pnpm dev
 ```
 
 Open <http://localhost:3000>. The API defaults to <http://localhost:8000>.
+
+Native development defaults to `NEXT_PUBLIC_RUNTIME_MODE=local-service`. A static Cloudflare build uses `browser-preview` unless the explicitly configured hosted build is selected.
 
 `NEXT_PUBLIC_API_BASE_URL` is a public browser setting, not a secret. Set it before `next build` when the API is hosted elsewhere:
 
@@ -50,7 +52,8 @@ The client uses the canonical camelCase contracts in `@homeworker/contracts`:
 - `POST /v1/projects` with multipart field `file`
 - `GET /v1/projects/{id}`; processing projects are polled with an abortable request
 - `PATCH /v1/projects/{id}/blocks/{block_id}` with `text` and `expectedRevision`
-- `POST /v1/projects/{id}/confirm` with `expectedRevision` and the acknowledged uncertain block IDs
+- `POST /v1/projects/{id}/blocks/{block_id}/review` with `expectedRevision` for explicit approval
+- `POST /v1/projects/{id}/confirm` with `expectedRevision`; persisted block reviews are authoritative
 - `PATCH /v1/projects/{id}/settings` with flat partial settings and `expectedRevision`
 - `GET /v1/personas`
 - `GET /v1/projects/{id}/export.pdf`

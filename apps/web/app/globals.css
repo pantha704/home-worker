@@ -2508,6 +2508,24 @@ label:has(input:focus-visible) {
   resize: vertical;
 }
 
+.uncertain-block {
+  background: #fff8e7;
+  border: 1px solid #e6c66a;
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.uncertain-block > strong { color: #6f5000; }
+.uncertain-block > p { margin: 0; }
+.uncertain-block > span,
+.review-progress {
+  color: var(--muted);
+  font-size: 13px;
+}
+.uncertain-block .button { justify-self: start; }
+
 .page-review-bar,
 .page-reviewer-actions {
   display: flex;
@@ -2516,6 +2534,8 @@ label:has(input:focus-visible) {
   justify-content: flex-end;
   padding: 12px 18px 20px;
 }
+
+.page-review-bar .review-progress { margin-right: auto; }
 
 .page-refreshing {
   align-items: center;

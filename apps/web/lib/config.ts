@@ -1,7 +1,21 @@
 const DEFAULT_API_BASE_URL = "http://localhost:8000";
 
+export type RuntimeMode = "local-service" | "browser-preview" | "hosted";
+
+export function getRuntimeMode(): RuntimeMode {
+  const configured = process.env.NEXT_PUBLIC_RUNTIME_MODE;
+  if (configured === "hosted" || configured === "browser-preview" || configured === "local-service") {
+    return configured;
+  }
+  return process.env.NEXT_PUBLIC_STATIC_EXPORT === "1" ? "browser-preview" : "local-service";
+}
+
 export function isHostedMode(): boolean {
-  return process.env.NEXT_PUBLIC_RUNTIME_MODE === "hosted";
+  return getRuntimeMode() === "hosted";
+}
+
+export function isBrowserPreviewMode(): boolean {
+  return getRuntimeMode() === "browser-preview";
 }
 
 export function getApiBaseUrl(): string {
