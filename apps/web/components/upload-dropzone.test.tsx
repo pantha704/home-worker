@@ -41,12 +41,22 @@ describe("UploadDropzone", () => {
     expect(createBrowserProject).not.toHaveBeenCalled();
   });
 
-  it("rejects images in quick browser preview instead of implying OCR support", async () => {
+  it("accepts a PNG in browser-local mode instead of implying OCR is unavailable", async () => {
+    vi.mocked(createBrowserProject).mockResolvedValue({
+      id: "local_img",
+      filename: "notes.png",
+      mimeType: "image/png",
+      revision: 1,
+      text: "HOMEWORKER",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     const user = userEvent.setup({ applyAccept: false });
     render(<UploadDropzone />);
     await user.upload(screen.getByLabelText(/drop your notes/i), new File(["png"], "notes.png", { type: "image/png" }));
-    expect(screen.getByRole("status")).toHaveTextContent(/quick preview.*text-layer PDF/i);
-    expect(createBrowserProject).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /turn into handwritten notes/i }));
+    expect(createBrowserProject).toHaveBeenCalledOnce();
+    expect(createProject).not.toHaveBeenCalled();
   });
 
   it("creates a browser-local project without calling the API", async () => {

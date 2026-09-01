@@ -2,7 +2,7 @@
 
 Homeworker turns PDFs and document images into reviewable A4 notes rendered in a licensed handwriting persona. The repository currently ships a **full local application** and two explicitly limited beta profiles. OCR is uncertain evidence, not truth.
 
-The default native-development and Docker workflows use the FastAPI/Tesseract **full local mode** for PDF, PNG, and JPEG input. The separately labelled **Quick PDF preview** is a browser-only, static profile for PDFs with usable text layers; it stores projects in OPFS + IndexedDB and does not provide OCR, source-image evidence, all personas, or full review parity. It never silently falls back to upload.
+The default native-development and Docker workflows use the FastAPI/Tesseract **full local mode** for PDF, PNG, and JPEG input. The separately labelled **browser-local** profile processes text-layer PDFs, PNG, and JPEG in the browser with on-device Tesseract; OCR is uncertain evidence. It does not yet match FastAPI source-image evidence, all personas, or multi-page scanned PDFs. It never silently falls back to upload.
 
 The optional hosted profile (Cloudflare Pages / Render / Supabase Free) is an **experimental invite-only beta**, not a public-launch SLA: free services sleep or pause, and live authentication, two-account isolation, retention, deletion, restart recovery, TLS/CORS/CSP, and quota drills must pass before inviting users.
 

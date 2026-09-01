@@ -35,6 +35,7 @@ build/
 output/
 tmp/
 *.log
+apps/web/public/tesseract/
 
 # Editors and OS
 .DS_Store

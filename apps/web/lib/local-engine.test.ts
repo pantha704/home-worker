@@ -6,7 +6,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { WorkerMessageHandler } from "pdfjs-dist/legacy/build/pdf.worker.mjs";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { extractTextPages, renderA4Pdf } from "@/lib/local-engine";
+import { extractTextPages, renderA4Pdf, sniffSource } from "@/lib/local-engine";
 
 beforeAll(() => {
   Object.assign(globalThis, { pdfjsWorker: { WorkerMessageHandler } });
@@ -162,5 +162,15 @@ describe("browser-local PDF engine", () => {
     const token = "X".repeat(240);
     const rendered = await renderedText(await renderA4Pdf(token, fontBytes));
     expect(rendered.replace(/\s+/g, "")).toBe(token);
+  });
+
+  it("sniffs PDF, PNG, and JPEG magic bytes", () => {
+    expect(sniffSource(new TextEncoder().encode("%PDF-1.7"))).toBe("application/pdf");
+    expect(sniffSource(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe("image/png");
+    expect(sniffSource(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg");
+  });
+
+  it("rejects unsupported image containers before OCR", () => {
+    expect(() => sniffSource(new Uint8Array([0x47, 0x49, 0x46, 0x38]))).toThrow("supported source");
   });
 });

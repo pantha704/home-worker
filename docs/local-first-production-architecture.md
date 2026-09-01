@@ -1,6 +1,6 @@
 # Local-first production architecture
 
-Status: accepted direction; ordered multi-page text-layer PDF processing implemented on `main`
+Status: accepted direction; browser-local OCR for PNG/JPEG and one-page scans is implemented alongside ordered multi-page text-layer PDFs
 
 ## Decision
 

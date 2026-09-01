@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ensureStorageCapacity, requestLocalWorker, validateLocalPdfSource, withProjectLock } from "@/lib/browser-local";
+import { ensureStorageCapacity, requestLocalWorker, validateLocalPdfSource, validateLocalSource, withProjectLock } from "@/lib/browser-local";
 import { MAX_UPLOAD_BYTES } from "@/lib/validation";
 
 describe("browser-local safety gates", () => {
@@ -39,6 +39,13 @@ describe("browser-local safety gates", () => {
 
   it("rejects browser-local sources over the upload limit", () => {
     expect(() => validateLocalPdfSource(new Uint8Array(MAX_UPLOAD_BYTES + 1))).toThrow("25 MB");
+    expect(() => validateLocalSource(new Uint8Array(MAX_UPLOAD_BYTES + 1))).toThrow("25 MB");
+  });
+
+  it("accepts PNG and JPEG magic bytes and rejects GIF", () => {
+    expect(validateLocalSource(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe("image/png");
+    expect(validateLocalSource(new Uint8Array([0xff, 0xd8, 0xff, 0xdb]))).toBe("image/jpeg");
+    expect(() => validateLocalSource(new Uint8Array([0x47, 0x49, 0x46, 0x38]))).toThrow("supported source");
   });
 
   it("ignores non-protocol worker control messages until the deadline", async () => {
