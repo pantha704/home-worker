@@ -50,7 +50,7 @@ const policy = [
   "manifest-src 'self'",
   "media-src 'none'",
   "object-src 'self' blob:",
-  `script-src 'self' ${[...scriptHashes].sort().join(" ")}`,
+  `script-src 'self' 'wasm-unsafe-eval' ${[...scriptHashes].sort().join(" ")}`,
   "script-src-attr 'none'",
   "style-src 'self' 'unsafe-inline'",
   "worker-src 'self' blob:",

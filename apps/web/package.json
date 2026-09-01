@@ -7,15 +7,16 @@
   },
   "scripts": {
     "dev": "next dev",
+    "vendor:tesseract": "node scripts/vendor-tesseract.mjs",
     "build": "next build",
-    "build:pages": "NEXT_PUBLIC_STATIC_EXPORT=1 next build && NEXT_PUBLIC_STATIC_EXPORT=1 node scripts/write-cloudflare-headers.mjs",
+    "build:pages": "node scripts/vendor-tesseract.mjs && NEXT_PUBLIC_STATIC_EXPORT=1 next build && NEXT_PUBLIC_STATIC_EXPORT=1 node scripts/write-cloudflare-headers.mjs",
     "build:hosted": "NEXT_PUBLIC_RUNTIME_MODE=hosted next build && node scripts/write-cloudflare-headers.mjs",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "node scripts/vendor-tesseract.mjs && vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "node scripts/vendor-tesseract.mjs && playwright test"
   },
   "dependencies": {
     "@homeworker/contracts": "file:../../packages/contracts",
@@ -25,7 +26,9 @@
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "5.4.530",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "tesseract.js": "6.0.1",
+    "tesseract.js-core": "6.0.0"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

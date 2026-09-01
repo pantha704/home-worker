@@ -1,4 +1,5 @@
 import { LocalProjectRepository, sha256, type LocalObjectStore, type LocalProject } from "@/lib/local-store";
+import { sniffSource } from "@/lib/local-engine";
 import { MAX_UPLOAD_BYTES } from "@/lib/validation";
 
 interface StorageGate {
@@ -45,12 +46,17 @@ function isWorkerProgress(value: unknown): value is WorkerProgress {
 
 const DB_NAME = "homeworker-local-v1";
 const RESERVE_BYTES = 10 * 1024 * 1024;
-const WORKER_TIMEOUT_MS = 60_000;
+const WORKER_TIMEOUT_MS = 120_000;
 
 export function validateLocalPdfSource(source: Uint8Array): void {
   if (source.length > MAX_UPLOAD_BYTES) throw new Error("This PDF is larger than the 25 MB local limit.");
   const header = new TextDecoder("ascii").decode(source.subarray(0, Math.min(source.length, 1024)));
   if (!/^\s*%PDF-\d\.\d/.test(header)) throw new Error("This file is not a valid PDF.");
+}
+
+export function validateLocalSource(source: Uint8Array): "application/pdf" | "image/png" | "image/jpeg" {
+  if (source.length > MAX_UPLOAD_BYTES) throw new Error("This file is larger than the 25 MB local limit.");
+  return sniffSource(source);
 }
 
 export async function ensureStorageCapacity(sourceBytes: number, storage: StorageGate = navigator.storage): Promise<boolean> {
@@ -172,20 +178,19 @@ export async function createBrowserProject(
   file: File,
   options: Pick<WorkerRequestOptions, "signal" | "onProgress" | "onProcessing" | "onFinalizing"> = {},
 ): Promise<LocalProject> {
-  if (file.type !== "application/pdf") throw new Error("The browser-local preview currently supports PDF files only.");
   const source = new Uint8Array(await file.arrayBuffer());
-  validateLocalPdfSource(source);
+  const mimeType = validateLocalSource(source);
   await ensureStorageCapacity(source.length);
   return withProjectLock("create", async () => {
     options.onProcessing?.();
     const result = await requestLocalWorker("process", source, options);
     if (typeof result.text !== "string" || result.text.trim() === "") {
-      throw new Error(`The PDF worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
+      throw new Error(`The local worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
     }
     options.onFinalizing?.();
     return browserRepository().create({
       filename: file.name,
-      mimeType: "application/pdf",
+      mimeType,
       source,
       text: result.text,
       exportPdf: result.pdf,

@@ -35,9 +35,9 @@ export function UploadDropzone() {
 
   function selectFile(file: File | undefined) {
     if (!file) return;
-    if (browserPreview && file.type !== "application/pdf") {
+    if (browserPreview && file.type !== "application/pdf" && file.type !== "image/png" && file.type !== "image/jpeg") {
       setSelectedFile(null);
-      setMessage("Quick preview supports text-layer PDF files only. Run the full local application for PNG, JPEG, or scanned-document OCR.");
+      setMessage("Browser-local processing supports PDF, PNG, and JPEG. Multi-page scanned PDFs still need the full local application.");
       setState("error");
       return;
     }
@@ -129,7 +129,7 @@ export function UploadDropzone() {
     <div className="upload-card" id="upload">
       <div className="upload-card-heading">
         <span className="eyebrow">Start with your source</span>
-        <span className={hosted ? "hosted-pill" : "local-pill"}><span /> {hosted ? "Experimental hosted beta" : browserPreview ? "Quick PDF preview" : "Full local OCR"}</span>
+        <span className={hosted ? "hosted-pill" : "local-pill"}><span /> {hosted ? "Experimental hosted beta" : browserPreview ? "Browser-local OCR" : "Full local OCR"}</span>
       </div>
 
       <div
@@ -146,7 +146,7 @@ export function UploadDropzone() {
       >
         <input
           ref={inputRef}
-          accept={browserPreview ? ".pdf,application/pdf" : ".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"}
+          accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
           className="sr-only"
           id="source-file"
           onChange={(event) => selectFile(event.target.files?.[0])}
@@ -167,7 +167,7 @@ export function UploadDropzone() {
             <span className="upload-icon"><UploadIcon size={27} /></span>
             <strong>Drop your notes here</strong>
             <span>or <u>choose a file</u> from your device</span>
-            <small id="upload-help">{browserPreview ? "Text-layer PDF" : "PDF, PNG, or JPG"} · Up to {Math.round(maxBytes / 1024 / 1024)} MB</small>
+            <small id="upload-help">{browserPreview ? "PDF, PNG, or JPEG · on-device OCR" : "PDF, PNG, or JPG"} · Up to {Math.round(maxBytes / 1024 / 1024)} MB</small>
           </label>
         )}
       </div>

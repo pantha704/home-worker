@@ -6,7 +6,7 @@ export interface LocalObjectStore {
 interface ProjectRow {
   id: string;
   filename: string;
-  mimeType: "application/pdf";
+  mimeType: "application/pdf" | "image/png" | "image/jpeg";
   sourceDigest: string;
   currentRevision: number;
   createdAt: string;
@@ -24,7 +24,7 @@ interface RevisionRow {
 export interface LocalProject {
   id: string;
   filename: string;
-  mimeType: "application/pdf";
+  mimeType: "application/pdf" | "image/png" | "image/jpeg";
   revision: number;
   text: string;
   createdAt: string;
@@ -33,7 +33,7 @@ export interface LocalProject {
 
 interface CreateInput {
   filename: string;
-  mimeType: "application/pdf";
+  mimeType: "application/pdf" | "image/png" | "image/jpeg";
   source: Uint8Array;
   text: string;
   exportPdf: Uint8Array;
@@ -196,10 +196,15 @@ export class LocalProjectRepository {
       project?: { filename?: string; mimeType?: string; text?: string };
       objects?: { source?: { digest?: string; data?: string }; rendered?: { digest?: string; data?: string } };
     };
-    if (value.format !== "homeworker-project" || value.version !== 1 || value.project?.mimeType !== "application/pdf") {
+    if (value.format !== "homeworker-project" || value.version !== 1) {
       throw new Error("Unsupported Homeworker archive");
     }
-    if (!value.project.filename || typeof value.project.text !== "string" || !value.objects?.source?.data || !value.objects.rendered?.data) {
+    const project = value.project;
+    const mimeType = project?.mimeType;
+    if (!project || (mimeType !== "application/pdf" && mimeType !== "image/png" && mimeType !== "image/jpeg")) {
+      throw new Error("Unsupported Homeworker archive");
+    }
+    if (!project.filename || typeof project.text !== "string" || !value.objects?.source?.data || !value.objects.rendered?.data) {
       throw new Error("Incomplete Homeworker archive");
     }
     const source = decode(value.objects.source.data);
@@ -207,7 +212,7 @@ export class LocalProjectRepository {
     if (await sha256(source) !== value.objects.source.digest || await sha256(rendered) !== value.objects.rendered.digest) {
       throw new Error("Homeworker archive integrity check failed");
     }
-    return this.create({ filename: value.project.filename, mimeType: "application/pdf", source, text: value.project.text, exportPdf: rendered });
+    return this.create({ filename: project.filename, mimeType, source, text: project.text, exportPdf: rendered });
   }
 
   private view(project: ProjectRow, revision: RevisionRow): LocalProject {

@@ -7,6 +7,21 @@ GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
+export type LocalSourceType = "application/pdf" | "image/png" | "image/jpeg";
+
+export function sniffSource(bytes: Uint8Array): LocalSourceType {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+    && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  const header = new TextDecoder("ascii").decode(bytes.subarray(0, Math.min(bytes.length, 1024)));
+  if (/^\s*%PDF-\d\.\d/.test(header)) return "application/pdf";
+  throw new Error("This file is not a supported source. Use a PDF, PNG, or JPEG.");
+}
+
 export interface ExtractedTextPage {
   pageNumber: number;
   text: string;
@@ -130,4 +145,26 @@ export async function renderA4Pdf(text: string, fontBytes: Uint8Array): Promise<
     });
   }
   return document.save({ useObjectStreams: false });
+}
+
+export async function rasterizeFirstPdfPage(source: Uint8Array): Promise<Uint8Array> {
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new Error("This browser cannot rasterize scanned PDFs.");
+  }
+  const document = await getDocument({
+    data: source.slice(),
+    isEvalSupported: false,
+    useWorkerFetch: false,
+  }).promise;
+  if (document.numPages !== 1) {
+    throw new Error("Multi-page scanned PDFs are not enabled in browser OCR yet. Use a one-page scan or the full local application.");
+  }
+  const page = await document.getPage(1);
+  const viewport = page.getViewport({ scale: 2 });
+  const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("This browser cannot rasterize scanned PDFs.");
+  await page.render({ canvas: canvas as unknown as HTMLCanvasElement, viewport }).promise;
+  const blob = await canvas.convertToBlob({ type: "image/png" });
+  return new Uint8Array(await blob.arrayBuffer());
 }

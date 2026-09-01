@@ -1,6 +1,6 @@
 # Homeworker web
 
-The web app has three explicit runtime profiles. `local-service` is the full local FastAPI/Tesseract workflow for PDF, PNG, and JPEG. `browser-preview` is a quick, browser-only preview for text-layer PDFs and does not provide OCR or full evidence/review parity. `hosted` is an experimental invite-only beta that requires live acceptance before use beyond testers.
+The web app has three explicit runtime profiles. `local-service` is the full local FastAPI/Tesseract workflow for PDF, PNG, and JPEG. `browser-preview` is the static/browser-local profile: text-layer PDFs, PNG, and JPEG with on-device Tesseract. OCR is uncertain evidence and does not yet match FastAPI source-image review, all personas, or multi-page scans. `hosted` is an experimental invite-only beta that requires live acceptance before use beyond testers.
 
 No paid service or API key is required for full local mode. Hosted mode statically exports the site for Cloudflare Pages Free and uses Supabase Free magic-link authentication before calling the owner-scoped API.
 

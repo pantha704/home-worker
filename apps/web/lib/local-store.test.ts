@@ -62,4 +62,26 @@ describe("local project repository", () => {
     tampered[tampered.length - 3] ^= 1;
     await expect(importedRepo.importArchive(tampered)).rejects.toThrow();
   });
+
+  it("round-trips a PNG project through a digest-verified archive", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const project = await repo.create({
+      filename: "notes.png",
+      mimeType: "image/png",
+      source: png,
+      text: "HOMEWORKER",
+      exportPdf: bytes("rendered"),
+    });
+    const imported = await new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects()).importArchive(await repo.exportArchive(project.id));
+    expect(imported).toMatchObject({ filename: "notes.png", mimeType: "image/png", text: "HOMEWORKER" });
+  });
+
+  it("rejects an archive whose mimeType is not a supported source", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("source"), text: "reviewed", exportPdf: bytes("rendered") });
+    const archive = JSON.parse(new TextDecoder().decode(await repo.exportArchive(project.id))) as { project: { mimeType: string } };
+    archive.project.mimeType = "image/gif";
+    await expect(repo.importArchive(new TextEncoder().encode(JSON.stringify(archive)))).rejects.toThrow("Unsupported Homeworker archive");
+  });
 });

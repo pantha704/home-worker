@@ -34,6 +34,20 @@ test("processes, reopens, edits, and exports a PDF without document API traffic"
   expect(apiRequests).toEqual([]);
 });
 
+test("processes a PNG with on-device OCR without document API traffic", async ({ page }) => {
+  test.setTimeout(120_000);
+  const apiRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/v1/")) apiRequests.push(request.url());
+  });
+  await page.goto("/");
+  await page.getByLabel(/drop your notes/i).setInputFiles(path.resolve(process.cwd(), "../../fixtures/ocr-homeworker.png"));
+  await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
+  await expect(page).toHaveURL(/\/project\?id=local_/);
+  await expect(page.getByRole("textbox", { name: /review extracted text/i })).toContainText(/HOMEWORKER/i);
+  expect(apiRequests).toEqual([]);
+});
+
 test("extracts every source page in order", async ({ page }) => {
   const apiRequests: string[] = [];
   page.on("request", (request) => {
