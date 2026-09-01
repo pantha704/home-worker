@@ -139,8 +139,8 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
         run: pnpm --filter @homeworker/web build:hosted
 
-      - name: Install Chromium for end-to-end smoke test
-        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+      - name: Install Chromium and Firefox for end-to-end tests
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium firefox
 
       - name: Run browser smoke test
         env:

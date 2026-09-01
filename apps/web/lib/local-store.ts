@@ -73,14 +73,26 @@ function decode(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
 }
 
+export interface LocalCheckpoint {
+  digest: string;
+  filename: string;
+  mimeType: "application/pdf" | "image/png" | "image/jpeg";
+  pages: string[];
+  total: number;
+  text?: string;
+  updatedAt: string;
+}
+
 export class LocalProjectRepository {
   constructor(private readonly dbName: string, private readonly objects: LocalObjectStore) {}
 
   private async database(): Promise<IDBDatabase> {
-    const opening = indexedDB.open(this.dbName, 1);
+    const opening = indexedDB.open(this.dbName, 2);
     opening.onupgradeneeded = () => {
-      opening.result.createObjectStore("projects", { keyPath: "id" });
-      opening.result.createObjectStore("revisions", { keyPath: "key" });
+      const database = opening.result;
+      if (!database.objectStoreNames.contains("projects")) database.createObjectStore("projects", { keyPath: "id" });
+      if (!database.objectStoreNames.contains("revisions")) database.createObjectStore("revisions", { keyPath: "key" });
+      if (!database.objectStoreNames.contains("checkpoints")) database.createObjectStore("checkpoints", { keyPath: "digest" });
     };
     return request(opening);
   }
@@ -213,6 +225,34 @@ export class LocalProjectRepository {
       throw new Error("Homeworker archive integrity check failed");
     }
     return this.create({ filename: project.filename, mimeType, source, text: project.text, exportPdf: rendered });
+  }
+
+  async getCheckpoint(digest: string): Promise<LocalCheckpoint | undefined> {
+    const database = await this.database();
+    const transaction = database.transaction("checkpoints", "readonly");
+    const value = await request(transaction.objectStore("checkpoints").get(digest)) as LocalCheckpoint | undefined;
+    await complete(transaction);
+    database.close();
+    return value;
+  }
+
+  async saveCheckpoint(checkpoint: LocalCheckpoint): Promise<void> {
+    if (!Array.isArray(checkpoint.pages) || checkpoint.total < 1 || checkpoint.pages.length > checkpoint.total) {
+      throw new Error("Invalid processing checkpoint");
+    }
+    const database = await this.database();
+    const transaction = database.transaction("checkpoints", "readwrite");
+    transaction.objectStore("checkpoints").put({ ...checkpoint, updatedAt: new Date().toISOString() });
+    await complete(transaction);
+    database.close();
+  }
+
+  async deleteCheckpoint(digest: string): Promise<void> {
+    const database = await this.database();
+    const transaction = database.transaction("checkpoints", "readwrite");
+    transaction.objectStore("checkpoints").delete(digest);
+    await complete(transaction);
+    database.close();
   }
 
   private view(project: ProjectRow, revision: RevisionRow): LocalProject {

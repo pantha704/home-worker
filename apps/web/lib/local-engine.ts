@@ -38,7 +38,8 @@ const MAX_SOURCE_PAGES = 100;
 
 export async function extractTextPages(
   source: Uint8Array,
-  onPage?: (pageNumber: number, totalPages: number) => void,
+  onPage?: (pageNumber: number, totalPages: number, text: string) => void,
+  startPage = 1,
 ): Promise<ExtractedTextPage[]> {
   const document = await getDocument({
     data: source.slice(),
@@ -48,8 +49,11 @@ export async function extractTextPages(
   if (document.numPages > MAX_SOURCE_PAGES) {
     throw new Error(`PDFs with more than ${MAX_SOURCE_PAGES} pages are not supported.`);
   }
+  if (startPage < 1 || startPage > document.numPages) {
+    throw new Error("Processing checkpoint does not match this document.");
+  }
   const pages: ExtractedTextPage[] = [];
-  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+  for (let pageNumber = startPage; pageNumber <= document.numPages; pageNumber += 1) {
     const sourcePage = await document.getPage(pageNumber);
     const content = await sourcePage.getTextContent();
     const pageWidth = sourcePage.getViewport({ scale: 1 }).width;
@@ -79,9 +83,9 @@ export async function extractTextPages(
     const text = orderedLines
       .map((line) => line.map((item) => item.text).join(" "))
       .join("\n");
-    if (!text) throw new Error(`Page ${pageNumber} has no usable text layer; browser OCR is not enabled yet.`);
+    if (!text) throw new Error(`Page ${pageNumber} has no usable text layer.`);
     pages.push({ pageNumber, text });
-    onPage?.(pageNumber, document.numPages);
+    onPage?.(pageNumber, document.numPages, text);
   }
   return pages;
 }

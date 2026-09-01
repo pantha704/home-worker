@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import fitz
 from PIL import Image
 
 from app.config import Settings
@@ -44,3 +47,12 @@ def test_ocr_normalizes_confidence_bbox_and_warning(monkeypatch) -> None:
     assert block.source.bbox is not None
     assert block.source.bbox.x == 5
     assert any(warning.code == "LOW_OCR_CONFIDENCE" for warning in block.warnings)
+
+
+def test_typed_fixture_text_matches_browser_corpus_markers() -> None:
+    fixture = Path(__file__).resolve().parents[3] / "fixtures" / "sample-typed.pdf"
+    with fitz.open(fixture) as document:
+        text = "\n".join(str(page.get_text()) for page in document)
+    assert "Physics revision: Newton's laws" in text
+    assert "Force equals mass times acceleration" in text
+    assert "Rights-cleared synthetic fixture for Homeworker tests." in text

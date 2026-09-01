@@ -15,16 +15,21 @@ interface WorkerResult {
 }
 
 interface WorkerFailure { kind: "error"; requestId: string; error: string }
-interface WorkerProgress { kind: "progress"; requestId: string; completed: number; total: number }
+interface WorkerProgress { kind: "progress"; requestId: string; completed: number; total: number; text?: string }
 
 interface WorkerRequestOptions {
   timeoutMs?: number;
   createWorker?: () => Worker;
   requestId?: string;
   signal?: AbortSignal;
-  onProgress?: (progress: { completed: number; total: number }) => void;
+  onProgress?: (progress: { completed: number; total: number; text?: string }) => void;
   onProcessing?: () => void;
   onFinalizing?: () => void;
+  resumeFrom?: number;
+  priorPages?: string[];
+  repository?: LocalProjectRepository;
+  storage?: StorageGate;
+  locks?: LockManager;
 }
 
 function isWorkerResponse(value: unknown): value is WorkerResult | WorkerFailure {
@@ -41,7 +46,8 @@ function isWorkerProgress(value: unknown): value is WorkerProgress {
     && "requestId" in value && typeof value.requestId === "string"
     && "completed" in value && typeof value.completed === "number" && Number.isInteger(value.completed)
     && "total" in value && typeof value.total === "number" && Number.isInteger(value.total)
-    && value.completed >= 0 && value.total > 0 && value.completed <= value.total;
+    && value.completed >= 0 && value.total > 0 && value.completed <= value.total
+    && (!("text" in value) || typeof value.text === "string");
 }
 
 const DB_NAME = "homeworker-local-v1";
@@ -60,11 +66,20 @@ export function validateLocalSource(source: Uint8Array): "application/pdf" | "im
 }
 
 export async function ensureStorageCapacity(sourceBytes: number, storage: StorageGate = navigator.storage): Promise<boolean> {
-  const [{ quota = 0, usage = 0 }, persistent] = await Promise.all([storage.estimate(), storage.persist()]);
+  const { quota = 0, usage = 0 } = await storage.estimate();
   if (quota - usage < sourceBytes * 3 + RESERVE_BYTES) {
     throw new Error("Not enough browser storage space. Export or remove projects, then retry.");
   }
-  return persistent;
+  try {
+    return await Promise.race([
+      storage.persist(),
+      new Promise<boolean>((resolve) => {
+        window.setTimeout(() => resolve(false), 500);
+      }),
+    ]);
+  } catch {
+    return false;
+  }
 }
 
 export async function withProjectLock<T>(
@@ -167,7 +182,13 @@ export function requestLocalWorker(
     }
     if (payload instanceof Uint8Array) {
       const copy = payload.slice();
-      worker.postMessage({ action, requestId, source: copy }, [copy.buffer]);
+      worker.postMessage({
+        action,
+        requestId,
+        source: copy,
+        resumeFrom: options.resumeFrom,
+        priorPages: options.priorPages,
+      }, [copy.buffer]);
     } else {
       worker.postMessage({ action, requestId, text: payload });
     }
@@ -176,26 +197,65 @@ export function requestLocalWorker(
 
 export async function createBrowserProject(
   file: File,
-  options: Pick<WorkerRequestOptions, "signal" | "onProgress" | "onProcessing" | "onFinalizing"> = {},
+  options: Pick<WorkerRequestOptions, "signal" | "onProgress" | "onProcessing" | "onFinalizing" | "createWorker" | "repository" | "storage" | "locks"> = {},
 ): Promise<LocalProject> {
   const source = new Uint8Array(await file.arrayBuffer());
   const mimeType = validateLocalSource(source);
-  await ensureStorageCapacity(source.length);
+  await ensureStorageCapacity(source.length, options.storage);
+  const repo = options.repository ?? browserRepository();
   return withProjectLock("create", async () => {
+    const digest = await sha256(source);
+    const checkpoint = await repo.getCheckpoint(digest);
+    const pages = checkpoint?.pages.slice() ?? [];
     options.onProcessing?.();
-    const result = await requestLocalWorker("process", source, options);
-    if (typeof result.text !== "string" || result.text.trim() === "") {
-      throw new Error(`The local worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
+    let text = typeof checkpoint?.text === "string" && checkpoint.text.trim() ? checkpoint.text : undefined;
+    let pdf: Uint8Array;
+    if (text) {
+      const result = await requestLocalWorker("render", text, options);
+      pdf = result.pdf;
+    } else {
+      const writes: Promise<void>[] = [];
+      const result = await requestLocalWorker("process", source, {
+        ...options,
+        resumeFrom: pages.length + 1,
+        priorPages: pages,
+        onProgress: (progress) => {
+          if (typeof progress.text === "string" && progress.text.trim() !== "") {
+            pages.push(progress.text);
+            writes.push(repo.saveCheckpoint({
+              digest,
+              filename: file.name,
+              mimeType,
+              pages: pages.slice(),
+              total: progress.total,
+              updatedAt: new Date().toISOString(),
+            }));
+          }
+          options.onProgress?.(progress);
+        },
+      });
+      await Promise.all(writes);
+      if (typeof result.text !== "string" || result.text.trim() === "") {
+        throw new Error(`The local worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
+      }
+      text = result.text;
+      pdf = result.pdf;
+      await repo.saveCheckpoint({
+        digest,
+        filename: file.name,
+        mimeType,
+        pages: pages.length > 0 ? pages : [text],
+        total: Math.max(pages.length, 1),
+        text,
+        updatedAt: new Date().toISOString(),
+      });
     }
+    if (options.signal?.aborted) throw new Error("Local document processing was cancelled.");
     options.onFinalizing?.();
-    return browserRepository().create({
-      filename: file.name,
-      mimeType,
-      source,
-      text: result.text,
-      exportPdf: result.pdf,
-    });
-  });
+    const project = await repo.create({ filename: file.name, mimeType, source, text, exportPdf: pdf });
+    await repo.deleteCheckpoint(digest);
+    return project;
+  }, options.locks);
 }
 
 export async function updateBrowserProject(projectId: string, expectedRevision: number, text: string): Promise<LocalProject> {

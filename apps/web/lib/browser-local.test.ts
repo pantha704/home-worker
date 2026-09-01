@@ -1,6 +1,8 @@
+import "fake-indexeddb/auto";
 import { describe, expect, it, vi } from "vitest";
 
-import { ensureStorageCapacity, requestLocalWorker, validateLocalPdfSource, validateLocalSource, withProjectLock } from "@/lib/browser-local";
+import { createBrowserProject, ensureStorageCapacity, requestLocalWorker, validateLocalPdfSource, validateLocalSource, withProjectLock } from "@/lib/browser-local";
+import { LocalProjectRepository, sha256, type LocalObjectStore } from "@/lib/local-store";
 import { MAX_UPLOAD_BYTES } from "@/lib/validation";
 
 describe("browser-local safety gates", () => {
@@ -16,6 +18,14 @@ describe("browser-local safety gates", () => {
     const storage = {
       estimate: vi.fn().mockResolvedValue({ quota: 100_000_000, usage: 0 }),
       persist: vi.fn().mockResolvedValue(false),
+    };
+    await expect(ensureStorageCapacity(100, storage)).resolves.toBe(false);
+  });
+
+  it("does not wait forever when persistence is slow to resolve", async () => {
+    const storage = {
+      estimate: vi.fn().mockResolvedValue({ quota: 100_000_000, usage: 0 }),
+      persist: vi.fn().mockReturnValue(new Promise(() => undefined)),
     };
     await expect(ensureStorageCapacity(100, storage)).resolves.toBe(false);
   });
@@ -92,7 +102,7 @@ describe("browser-local safety gates", () => {
     } as unknown as Worker;
     const pending = requestLocalWorker("process", new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
       timeoutMs: 50,
-      createWorker: () => worker,
+      createWorker: () => worker as unknown as Worker,
     });
     const rejection = expect(pending).rejects.toThrow("timed out");
     await vi.advanceTimersByTimeAsync(50);
@@ -112,7 +122,7 @@ describe("browser-local safety gates", () => {
     } as unknown as Worker;
     const pending = requestLocalWorker("render", "text", {
       timeoutMs: 50,
-      createWorker: () => worker,
+      createWorker: () => worker as unknown as Worker,
       requestId: "current",
       onProgress,
     });
@@ -136,7 +146,7 @@ describe("browser-local safety gates", () => {
     } as unknown as Worker;
     const pending = requestLocalWorker("render", "text", {
       timeoutMs: 50,
-      createWorker: () => worker,
+      createWorker: () => worker as unknown as Worker,
       requestId: "current",
     });
     worker.onmessage?.({ data: { kind: "result", requestId: "stale", pdf: "invalid" } } as MessageEvent);
@@ -156,7 +166,7 @@ describe("browser-local safety gates", () => {
     } as unknown as Worker;
     const pending = requestLocalWorker("render", "text", {
       timeoutMs: 50,
-      createWorker: () => worker,
+      createWorker: () => worker as unknown as Worker,
       requestId: "current",
     });
     worker.onmessage?.({ data: { kind: "result", requestId: "current", pdf: new Uint8Array([1]) } } as MessageEvent);
@@ -178,5 +188,62 @@ describe("browser-local safety gates", () => {
     controller.abort();
     await expect(pending).rejects.toThrow("cancelled");
     expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+});
+
+class MemoryObjects implements LocalObjectStore {
+  readonly values = new Map<string, Uint8Array>();
+  async put(digest: string, bytes: Uint8Array) { this.values.set(digest, bytes.slice()); }
+  async get(digest: string) {
+    const value = this.values.get(digest);
+    if (!value) throw new Error("missing object");
+    return value.slice();
+  }
+}
+
+describe("browser-local checkpoints", () => {
+  const storage = {
+    estimate: vi.fn().mockResolvedValue({ quota: 100_000_000, usage: 0 }),
+    persist: vi.fn().mockResolvedValue(true),
+  };
+  const locks = {
+    request: (_name: string, _opts: unknown, operation: () => Promise<unknown>) => operation(),
+  } as unknown as LockManager;
+
+  it("keeps a checkpoint when cancelled after the worker and resumes by rendering it", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    const source = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const file = new File([source], "notes.png", { type: "image/png" });
+    const controller = new AbortController();
+    const worker = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onerror: null,
+      postMessage(data: { requestId: string }) {
+        worker.onmessage?.({ data: { kind: "result", requestId: data.requestId, text: "HOMEWORKER", pdf: new Uint8Array([1]) } } as MessageEvent);
+        controller.abort();
+      },
+      terminate: vi.fn(),
+    };
+
+    await expect(createBrowserProject(file, {
+      signal: controller.signal,
+      createWorker: () => worker as unknown as Worker,
+      repository: repo,
+      storage,
+      locks,
+    })).rejects.toThrow("cancelled");
+
+    const digest = await sha256(source);
+    expect(await repo.getCheckpoint(digest)).toMatchObject({ text: "HOMEWORKER" });
+    await expect(repo.get("missing")).rejects.toThrow();
+
+    const resumed = await createBrowserProject(file, {
+      createWorker: () => worker as unknown as Worker,
+      repository: repo,
+      storage,
+      locks,
+    });
+    expect(resumed.text).toBe("HOMEWORKER");
+    expect(await repo.getCheckpoint(digest)).toBeUndefined();
   });
 });

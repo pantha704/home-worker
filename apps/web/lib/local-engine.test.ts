@@ -57,6 +57,27 @@ describe("browser-local PDF engine", () => {
     ]);
   });
 
+  it("resumes extraction after a completed page checkpoint", async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    for (const text of ["First page marker", "Second page marker", "Third page marker"]) {
+      const page = pdf.addPage([400, 600]);
+      page.drawText(text, { x: 40, y: 540, size: 16, font });
+    }
+    await expect(extractTextPages(await pdf.save(), undefined, 2)).resolves.toEqual([
+      { pageNumber: 2, text: "Second page marker" },
+      { pageNumber: 3, text: "Third page marker" },
+    ]);
+  });
+
+  it("extracts the rights-cleared typed corpus fixture", async () => {
+    const pages = await extractTextPages(new Uint8Array(await readFile("../../fixtures/sample-typed.pdf")));
+    const text = pages.map((page) => page.text).join("\n");
+    expect(text).toContain("Physics revision: Newton's laws");
+    expect(text).toContain("Force equals mass times acceleration");
+    expect(text).toContain("Rights-cleared synthetic fixture for Homeworker tests.");
+  });
+
   it("preserves visual lines and horizontal reading order", async () => {
     const pdf = await PDFDocument.create();
     const font = await pdf.embedFont(StandardFonts.Helvetica);
