@@ -1,15 +1,34 @@
 from __future__ import annotations
 
 import fitz
+import pytest
 from fastapi.testclient import TestClient
 from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from sqlalchemy import func, select
 
 from app.config import Settings
 from app.db import ObjectDeletionRow, RevisionRow
 from app.errors import InkError
 from app.main import create_app
+from app.models import PersonaId
+from app.rendering import (
+    PERSONA_PARAMETERS,
+    _fallback_font_path,
+    _font_for_persona,
+    _split_lines,
+)
 from tests.conftest import make_native_pdf
+
+
+def confirm_revision(client: TestClient, project_id: str, revision: int) -> dict:
+    response = client.post(
+        f"/v1/projects/{project_id}/confirm",
+        json={"expectedRevision": revision},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_health_ready_and_request_id(client: TestClient) -> None:
@@ -96,6 +115,20 @@ def test_review_settings_confirm_and_revision_conflict(
         assert "DRAFT - REVIEW REQUIRED" not in "\n".join(page.get_text() for page in document)
 
 
+def test_final_artifacts_require_completed_review(
+    client: TestClient, created_project: dict
+) -> None:
+    project_id = created_project["id"]
+    for endpoint in ("export.pdf", "companion.pdf", "companion.txt", "manifest.json"):
+        response = client.get(f"/v1/projects/{project_id}/{endpoint}")
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "REVIEW_INCOMPLETE"
+
+    preview = client.get(f"/v1/projects/{project_id}/sheets/1.png")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("image/png")
+
+
 def test_personas_and_deterministic_a4_exports(client: TestClient, created_project: dict) -> None:
     personas = client.get("/v1/personas")
     assert personas.status_code == 200
@@ -103,16 +136,17 @@ def test_personas_and_deterministic_a4_exports(client: TestClient, created_proje
     assert all("Open Font License" in item["license"] for item in personas.json())
 
     project_id = created_project["id"]
+    confirmed = confirm_revision(client, project_id, 1)
     first = client.get(f"/v1/projects/{project_id}/export.pdf")
     second = client.get(f"/v1/projects/{project_id}/export.pdf")
     assert first.status_code == 200, first.text
     assert first.content == second.content
-    assert first.headers["X-Project-Revision"] == "1"
+    assert first.headers["X-Project-Revision"] == str(confirmed["revision"])
     with fitz.open(stream=first.content, filetype="pdf") as document:
         assert document.page_count >= 1
         assert abs(document[0].rect.width - A4[0]) < 0.1
         assert abs(document[0].rect.height - A4[1]) < 0.1
-        assert "DRAFT - REVIEW REQUIRED" in document[0].get_text()
+        assert "DRAFT - REVIEW REQUIRED" not in document[0].get_text()
         assert all(
             document.extract_font(font[0])[3]
             for page in document
@@ -275,6 +309,58 @@ def test_delete_surfaces_post_commit_storage_cleanup_failure(
     assert queued == 1
 
 
+@pytest.mark.parametrize("symbol", ["‰", "≤", "∞"])
+def test_supported_fallback_glyphs_wrap_without_clipping(
+    client: TestClient, created_project: dict, symbol: str
+) -> None:
+    project_id = created_project["id"]
+    block_id = created_project["pages"][0]["blocks"][0]["id"]
+    repeated = symbol * 63
+    patched = client.patch(
+        f"/v1/projects/{project_id}/blocks/{block_id}",
+        json={"text": repeated, "expectedRevision": 1},
+    )
+    assert patched.status_code == 200
+    confirm_revision(client, project_id, 2)
+
+    exported = client.get(f"/v1/projects/{project_id}/export.pdf")
+    assert exported.status_code == 200
+    with fitz.open(stream=exported.content, filetype="pdf") as document:
+        rendered = "".join(page.get_text() for page in document)
+    assert rendered.count(symbol) == len(repeated)
+
+
+def test_handwritten_wrap_reserves_worst_case_size_and_space_jitter() -> None:
+    parameters = PERSONA_PARAMETERS[PersonaId.CASUAL]
+    font_name = _font_for_persona(PersonaId.CASUAL)
+    fallback_name = "InkTestFallback"
+    if fallback_name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(fallback_name, str(_fallback_font_path())))
+    max_width = 120.0
+    lines = _split_lines(
+        "wide words ‰ wide words ‰ wide words ‰",
+        font_name,
+        fallback_name,
+        parameters.font_size,
+        max_width,
+        parameters.tracking,
+        size_jitter=parameters.size_jitter,
+    )
+    worst_size = parameters.font_size + parameters.size_jitter * 0.55 + 0.85
+    for line in lines:
+        width = sum(
+            pdfmetrics.stringWidth(
+                character,
+                font_name if character != "‰" else fallback_name,
+                worst_size,
+            )
+            + parameters.tracking
+            + (parameters.tracking * 2.4 if character.isspace() else 0)
+            for character in line
+        )
+        assert width <= max_width
+
+
 def test_unsupported_pdf_glyphs_fail_visibly_but_utf8_companion_preserves_text(
     client: TestClient, created_project: dict
 ) -> None:
@@ -286,6 +372,7 @@ def test_unsupported_pdf_glyphs_fail_visibly_but_utf8_companion_preserves_text(
         json={"text": unicode_text, "expectedRevision": 1},
     )
     assert patched.status_code == 200
+    confirm_revision(client, project_id, 2)
 
     exported = client.get(f"/v1/projects/{project_id}/export.pdf")
     assert exported.status_code == 422

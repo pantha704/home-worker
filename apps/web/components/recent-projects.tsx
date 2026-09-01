@@ -7,17 +7,18 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { ArrowRightIcon, FileIcon } from "@/components/icons";
 import { listProjects } from "@/lib/api";
-import { isHostedMode } from "@/lib/config";
+import { isBrowserPreviewMode } from "@/lib/config";
 import { safeProjectTitle } from "@/lib/project";
 import type { RecentProject } from "@/lib/recent-projects";
 
 export function RecentProjects() {
   const { hosted, session } = useAuth();
+  const browserPreview = isBrowserPreviewMode();
   const snapshot = useSyncExternalStore(subscribe, getStorageSnapshot, () => "[]");
   const [accountProjects, setAccountProjects] = useState<ProjectSummary[]>([]);
 
   useEffect(() => {
-    if (!hosted || !session) {
+    if (browserPreview || (hosted && !session)) {
       return;
     }
     const controller = new AbortController();
@@ -25,7 +26,7 @@ export function RecentProjects() {
       .then((result) => setAccountProjects(result.items.slice(0, 5)))
       .catch(() => setAccountProjects([]));
     return () => controller.abort();
-  }, [hosted, session]);
+  }, [browserPreview, hosted, session]);
 
   const localProjects = useMemo(() => {
     try {
@@ -35,7 +36,7 @@ export function RecentProjects() {
       return [];
     }
   }, [snapshot]);
-  const projects = hosted ? (session ? accountProjects : []) : localProjects;
+  const projects = browserPreview ? localProjects : (hosted && !session ? [] : accountProjects);
   if (projects.length === 0) return null;
 
   return (
@@ -45,7 +46,7 @@ export function RecentProjects() {
           <span className="eyebrow">Continue working</span>
           <h2 id="recent-heading">Recent projects</h2>
         </div>
-        <span className="muted-caption">{hosted ? "Private to your account" : "Stored on this browser"}</span>
+        <span className="muted-caption">{hosted ? "Private to your account" : browserPreview ? "Stored on this browser" : "Stored by your local service"}</span>
       </div>
       <div className="recent-grid">
         {projects.map((project) => (
@@ -64,12 +65,12 @@ export function RecentProjects() {
 }
 
 function getStorageSnapshot(): string {
-  if (isHostedMode()) return "[]";
+  if (!isBrowserPreviewMode()) return "[]";
   return window.localStorage.getItem("homeworker:recent-projects") ?? "[]";
 }
 
 function subscribe(onStoreChange: () => void): () => void {
-  if (isHostedMode()) return () => undefined;
+  if (!isBrowserPreviewMode()) return () => undefined;
   window.addEventListener("storage", onStoreChange);
   window.addEventListener("homeworker:recent", onStoreChange);
   return () => {

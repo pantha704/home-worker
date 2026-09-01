@@ -2,7 +2,7 @@ import { CheckIcon, ShieldIcon, SparkIcon } from "@/components/icons";
 import { RecentProjects } from "@/components/recent-projects";
 import { SiteHeader } from "@/components/site-header";
 import { UploadDropzone } from "@/components/upload-dropzone";
-import { isHostedMode } from "@/lib/config";
+import { getRuntimeMode } from "@/lib/config";
 
 const steps = [
   { number: "01", title: "Upload", copy: "Add a PDF or a clear photo of typed or handwritten notes." },
@@ -11,7 +11,9 @@ const steps = [
 ];
 
 export default function HomePage() {
-  const hosted = isHostedMode();
+  const mode = getRuntimeMode();
+  const hosted = mode === "hosted";
+  const preview = mode === "browser-preview";
   return (
     <main>
       <SiteHeader />
@@ -20,11 +22,13 @@ export default function HomePage() {
           <div className="hero-kicker"><SparkIcon size={16} /> Built for careful study notes</div>
           <h1>From source pages to notes that <em>feel written.</em></h1>
           <p className="hero-lead">
-            Read PDFs and handwriting, review every uncertain detail, then lay it out in a fresh, licensed handwriting style—ready for A4 printing.
+            {preview
+              ? "Privately preview text-layer PDFs in your browser. Scans, photos, OCR evidence, and full review require the local application."
+              : "Read PDFs and handwriting, review every uncertain detail, then lay it out in a fresh, licensed handwriting style—ready for A4 printing."}
           </p>
           <ul className="hero-checks" aria-label="Homeworker benefits">
             <li><CheckIcon /> No silent rewriting</li>
-            <li><CheckIcon /> {hosted ? "Free-tier private processing" : "Free, local-first processing"}</li>
+            <li><CheckIcon /> {hosted ? "Experimental free-tier hosted beta" : preview ? "Quick PDF preview—no OCR" : "Full local OCR service"}</li>
             <li><CheckIcon /> Accessible typed copy included</li>
           </ul>
         </div>
@@ -56,15 +60,15 @@ export default function HomePage() {
           <span className="trust-icon"><ShieldIcon size={26} /></span>
           <div>
             <span className="eyebrow">Made for responsible use</span>
-            <h2 id="privacy-heading">{hosted ? "Private by account, deleted automatically." : "Your notes, processed on your machine."}</h2>
-            <p>{hosted ? "Files are stored privately in Supabase Free, processed by the bounded OCR service, and scheduled for deletion after 14 days. Built-in personas are licensed styles—not copied handwriting or signatures." : "Files stay in your local Homeworker installation. Built-in personas are licensed styles—not copied handwriting or signatures. Use only content you have the right to process."}</p>
+            <h2 id="privacy-heading">{hosted ? "Private by account—acceptance testing is still required." : "Your notes, processed on your machine."}</h2>
+            <p>{hosted ? "This invite-only hosted beta uses private account storage and bounded OCR, but live isolation, retention, and deletion drills remain release gates." : preview ? "Text-layer PDFs stay in this browser. For scanned PDFs, PNG, JPEG, OCR evidence, and all three personas, run the full local application." : "Files stay in your local Homeworker installation and use the FastAPI/Tesseract service on 127.0.0.1. Built-in personas are licensed styles—not copied handwriting or signatures."}</p>
           </div>
         </section>
       </div>
 
       <footer className="site-footer">
         <div className="page-shell footer-inner">
-          <span>Homeworker · {hosted ? "Free-tier hosted beta" : "Local-first document transformation"}</span>
+          <span>Homeworker · {hosted ? "Experimental hosted beta" : preview ? "Quick browser PDF preview" : "Full local application"}</span>
           <span>Faithful by design.</span>
         </div>
       </footer>

@@ -1,10 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { createProject } from "@/lib/api";
 import { createBrowserProject, importBrowserArchive } from "@/lib/browser-local";
+import { isBrowserPreviewMode } from "@/lib/config";
 
 const push = vi.fn();
 
@@ -17,20 +18,34 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return { ...actual, createProject: vi.fn() };
 });
 vi.mock("@/lib/browser-local", () => ({ createBrowserProject: vi.fn(), importBrowserArchive: vi.fn() }));
+vi.mock("@/lib/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/config")>();
+  return { ...actual, isBrowserPreviewMode: vi.fn(() => true) };
+});
 
 describe("UploadDropzone", () => {
   beforeEach(() => {
     vi.mocked(createProject).mockReset();
     vi.mocked(createBrowserProject).mockReset();
     vi.mocked(importBrowserArchive).mockReset();
+    vi.mocked(isBrowserPreviewMode).mockReturnValue(true);
     push.mockReset();
   });
 
   it("validates an unsupported file without processing it", async () => {
+    vi.mocked(isBrowserPreviewMode).mockReturnValue(false);
     const user = userEvent.setup({ applyAccept: false });
     render(<UploadDropzone />);
     await user.upload(screen.getByLabelText(/drop your notes/i), new File(["bad"], "notes.txt", { type: "text/plain" }));
     expect(screen.getByRole("status")).toHaveTextContent(/PDF, PNG, JPG/i);
+    expect(createBrowserProject).not.toHaveBeenCalled();
+  });
+
+  it("rejects images in quick browser preview instead of implying OCR support", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    render(<UploadDropzone />);
+    await user.upload(screen.getByLabelText(/drop your notes/i), new File(["png"], "notes.png", { type: "image/png" }));
+    expect(screen.getByRole("status")).toHaveTextContent(/quick preview.*text-layer PDF/i);
     expect(createBrowserProject).not.toHaveBeenCalled();
   });
 
@@ -50,7 +65,31 @@ describe("UploadDropzone", () => {
     await user.click(screen.getByRole("button", { name: /turn into handwritten notes/i }));
     expect(createBrowserProject).toHaveBeenCalledOnce();
     expect(createProject).not.toHaveBeenCalled();
-    expect(push).toHaveBeenCalledWith("/project?id=local_42");
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/project?id=local_42"));
+  });
+
+  it("uses the full local API by default instead of the browser preview engine", async () => {
+    vi.mocked(isBrowserPreviewMode).mockReturnValue(false);
+    vi.mocked(createProject).mockResolvedValue({
+      id: "project-42",
+      filename: "handwritten.png",
+      mimeType: "image/png",
+      sha256: "0".repeat(64),
+      status: "processing",
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      pages: [],
+      settings: { personaId: "scholar", seed: 1, inkColor: "#1d3557", paperStyle: "ruled", marginMm: 18, lineSpacing: 1.5, fontSizePt: 18 },
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(<UploadDropzone />);
+    await user.upload(screen.getByLabelText(/drop your notes/i), new File(["png"], "handwritten.png", { type: "image/png" }));
+    await user.click(screen.getByRole("button", { name: /turn into handwritten notes/i }));
+    await waitFor(() => expect(createProject).toHaveBeenCalledOnce());
+    expect(createBrowserProject).not.toHaveBeenCalled();
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/project?id=project-42"));
   });
 
   it("offers cancellation while local processing is active", async () => {
@@ -117,6 +156,6 @@ describe("UploadDropzone", () => {
     render(<UploadDropzone />);
     await user.upload(screen.getByLabelText(/restore .homeworker backup/i), new File(["archive"], "notes.homeworker"));
     expect(importBrowserArchive).toHaveBeenCalledOnce();
-    expect(push).toHaveBeenCalledWith("/project?id=local_restored");
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/project?id=local_restored"));
   });
 });

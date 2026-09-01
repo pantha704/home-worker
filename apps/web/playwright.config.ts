@@ -14,7 +14,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 13200",
+    command: "NEXT_PUBLIC_RUNTIME_MODE=browser-preview npm run dev -- --hostname 127.0.0.1 --port 13200",
     url: "http://127.0.0.1:13200/",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

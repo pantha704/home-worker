@@ -40,6 +40,7 @@ from .ingestion import EXTENSIONS, remove_project_storage, store_upload
 from .models import (
     ArtifactManifest,
     BlockPatch,
+    BlockReviewRequest,
     ConfirmRequest,
     HealthResponse,
     PageTextPatch,
@@ -64,6 +65,7 @@ from .service import (
     patch_page_text,
     patch_settings,
     replace_extracted_pages,
+    review_block,
 )
 from .storage import ObjectStore, artifact_object_key, build_object_store, source_object_key
 from .worker import worker_loop
@@ -135,10 +137,10 @@ def _artifact_bytes(
     kind: ArtifactKind,
 ) -> tuple[ProjectDocument, ArtifactRecord, bytes]:
     project = _load_project_revision(repository, owner_id, project_id, revision)
-    if project.status in {ProjectStatus.PROCESSING, ProjectStatus.FAILED} or not project.pages:
+    if project.status != ProjectStatus.READY:
         raise InkError(
-            "ARTIFACT_NOT_READY",
-            "The document must finish processing before an artifact can be generated.",
+            "REVIEW_INCOMPLETE",
+            "Complete review for this exact revision before downloading final artifacts.",
             status_code=409,
         )
     existing = repository.get_artifact(owner_id, project_id, project.revision, kind)
@@ -188,19 +190,23 @@ def _artifact_bytes(
             "The generated artifact could not be verified after private storage.",
             status_code=503,
         )
-    record = repository.record_artifact(
-        ArtifactRecord(
-            project_id=project_id,
-            revision=project.revision,
-            kind=kind,
-            owner_id=owner_id,
-            object_key=key,
-            sha256=digest,
-            size=len(content),
-            media_type=media_type,
-            created_at=datetime.now(UTC),
+    try:
+        record = repository.record_artifact(
+            ArtifactRecord(
+                project_id=project_id,
+                revision=project.revision,
+                kind=kind,
+                owner_id=owner_id,
+                object_key=key,
+                sha256=digest,
+                size=len(content),
+                media_type=media_type,
+                created_at=datetime.now(UTC),
+            )
         )
-    )
+    except Exception:
+        object_store.delete([key])
+        raise
     if record.object_key != key:
         content = object_store.get_bytes(record.object_key, record.size)
         if len(content) != record.size or hashlib.sha256(content).hexdigest() != record.sha256:
@@ -224,6 +230,8 @@ def create_app(
         schema=config.database_schema,
         auto_create=not config.hosted or config.allow_test_backends,
         max_revisions=config.max_project_revisions,
+        max_projects=config.max_projects_per_user,
+        max_storage_bytes=config.max_user_storage_bytes,
     )
     store = object_store or build_object_store(config)
     verifier = token_verifier or build_token_verifier(config)
@@ -488,6 +496,8 @@ def create_app(
                         "That Idempotency-Key already created a different document.",
                         status_code=409,
                     ) from None
+                await run_in_threadpool(store.delete, [key])
+                object_written = False
                 return JSONResponse(
                     status_code=200,
                     content=replay.model_dump(mode="json", by_alias=True),
@@ -598,6 +608,28 @@ def create_app(
             project_id,
             block_id,
             patch,
+        )
+
+    @application.post(
+        "/v1/projects/{project_id}/blocks/{block_id}/review",
+        response_model=ProjectDocument,
+        tags=["review"],
+    )
+    async def approve_block(
+        request: Request,
+        project_id: str,
+        block_id: str,
+        body: BlockReviewRequest,
+        identity: IdentityDependency,
+    ) -> ProjectDocument:
+        await _consume_mutation(request, identity.owner_id)
+        return await run_in_threadpool(
+            review_block,
+            _repository(request),
+            identity.owner_id,
+            project_id,
+            block_id,
+            body,
         )
 
     def _with_source_file(

@@ -10,6 +10,7 @@ from .errors import InkError
 from .models import (
     BlockKind,
     BlockPatch,
+    BlockReviewRequest,
     ConfirmRequest,
     DocumentBlock,
     DocumentPage,
@@ -73,6 +74,45 @@ def patch_block(
         return _next_revision(updated)
 
     return repository.mutate(owner_id, project_id, patch.expected_revision, transform)
+
+
+def review_block(
+    repository: ProjectRepository,
+    owner_id: str,
+    project_id: str,
+    block_id: str,
+    request: BlockReviewRequest,
+) -> ProjectDocument:
+    def transform(current: ProjectDocument) -> ProjectDocument:
+        updated = current.model_copy(deep=True)
+        target = next(
+            (block for page in updated.pages for block in page.blocks if block.id == block_id),
+            None,
+        )
+        if target is None:
+            raise InkError(
+                "BLOCK_NOT_FOUND",
+                "No block with that ID exists in the project.",
+                status_code=404,
+            )
+        if target.reviewed:
+            raise InkError(
+                "BLOCK_ALREADY_REVIEWED",
+                "This extracted block has already been reviewed.",
+                status_code=409,
+            )
+        target.reviewed = True
+        target.warnings.append(
+            ExtractionWarning(
+                code="USER_APPROVED",
+                message="This extracted block was explicitly approved during review.",
+                severity=WarningSeverity.INFO,
+            )
+        )
+        updated.status = ProjectStatus.NEEDS_REVIEW
+        return _next_revision(updated)
+
+    return repository.mutate(owner_id, project_id, request.expected_revision, transform)
 
 
 def patch_page_text(
@@ -172,22 +212,12 @@ def confirm_project(
                 "A failed project cannot be confirmed.",
                 status_code=409,
             )
-        acknowledged = set(request.acknowledged_block_ids)
-        block_ids = {block.id for page in updated.pages for block in page.blocks}
-        unknown = acknowledged - block_ids
-        if unknown:
-            raise InkError(
-                "UNKNOWN_ACKNOWLEDGEMENT",
-                "The review acknowledgement contains a block that is not in this revision.",
-                status_code=409,
-            )
         pending = [
             block.id
             for page in updated.pages
             for block in page.blocks
             if not block.reviewed
             and (block.confidence < 0.9 or bool(block.warnings))
-            and block.id not in acknowledged
         ]
         if pending:
             raise InkError(
@@ -226,6 +256,8 @@ def complete_processing(
     project_id: str,
     expected_revision: int,
     pages: list[DocumentPage],
+    *,
+    job_lease: tuple[str, str] | None = None,
 ) -> ProjectDocument:
     def transform(current: ProjectDocument) -> ProjectDocument:
         if current.status != ProjectStatus.PROCESSING:
@@ -240,7 +272,13 @@ def complete_processing(
         updated.error = None
         return _next_revision(updated)
 
-    return repository.mutate(owner_id, project_id, expected_revision, transform)
+    return repository.mutate(
+        owner_id,
+        project_id,
+        expected_revision,
+        transform,
+        job_lease=job_lease,
+    )
 
 
 def fail_processing(

@@ -14,8 +14,10 @@ interface PageReviewerProps {
   pageCount: number;
   projectId: string;
   refreshing: boolean;
+  reviewingBlockId: string | null;
   selected: boolean;
   onDraftChange: (text: string) => void;
+  onApproveBlock: (blockId: string) => void;
   onIndexChange: (index: number) => void;
   onSave: () => void;
   onToggleSelect: () => void;
@@ -29,8 +31,10 @@ export function PageReviewer({
   pageCount,
   projectId,
   refreshing,
+  reviewingBlockId,
   selected,
   onDraftChange,
+  onApproveBlock,
   onIndexChange,
   onSave,
   onToggleSelect,
@@ -114,6 +118,33 @@ export function PageReviewer({
             onChange={(event) => onDraftChange(event.target.value)}
             value={draftText}
           />
+          {page.blocks.filter((block) => !block.reviewed && (block.confidence < 0.9 || block.warnings.length > 0)).map((block) => (
+            <section
+              aria-busy={reviewingBlockId === block.id}
+              aria-labelledby={`uncertain-${block.id}`}
+              className="uncertain-block"
+              key={block.id}
+            >
+              <strong id={`uncertain-${block.id}`}>Uncertain extracted block</strong>
+              <p>{block.text}</p>
+              <span id={`uncertain-meta-${block.id}`}>Confidence {Math.round(block.confidence * 100)}% · source page {block.source.pageNumber}</span>
+              {block.warnings.map((warning, warningIndex) => (
+                <p id={`uncertain-warning-${block.id}-${warningIndex}`} key={`${block.id}:${warning.code}:${warningIndex}`}>{warning.message}</p>
+              ))}
+              <button
+                aria-describedby={[
+                  `uncertain-meta-${block.id}`,
+                  ...block.warnings.map((_, warningIndex) => `uncertain-warning-${block.id}-${warningIndex}`),
+                ].join(" ")}
+                className="button button-secondary"
+                disabled={busyPage !== null || reviewingBlockId !== null}
+                onClick={() => onApproveBlock(block.id)}
+                type="button"
+              >
+                {reviewingBlockId === block.id ? "Saving review…" : "Approve extracted text"}
+              </button>
+            </section>
+          ))}
           <div className="page-reviewer-actions">
             <button className="button button-secondary" disabled={!dirty} onClick={onSave} type="button">
               Save page

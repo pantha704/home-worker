@@ -238,7 +238,14 @@ def _draw_draft_watermark(pdf: canvas.Canvas, project: ProjectDocument) -> None:
 
 
 def _split_lines(
-    text: str, font_name: str, font_size: float, max_width: float, tracking: float
+    text: str,
+    font_name: str,
+    fallback_font_name: str,
+    font_size: float,
+    max_width: float,
+    tracking: float,
+    *,
+    size_jitter: float | None = None,
 ) -> list[str]:
     if text == "":
         return [""]
@@ -251,9 +258,18 @@ def _split_lines(
         last_space = -1
         for character in paragraph:
             candidate = current + character
-            width = (
-                pdfmetrics.stringWidth(candidate, font_name, font_size)
-                + max(0, len(candidate) - 1) * tracking
+            measured_size = (
+                font_size if size_jitter is None else font_size + size_jitter * 0.55 + 0.85
+            )
+            width = sum(
+                pdfmetrics.stringWidth(
+                    glyph,
+                    font_name if _font_supports(font_name, glyph) else fallback_font_name,
+                    measured_size,
+                )
+                + tracking
+                + (tracking * 2.4 if size_jitter is not None and glyph.isspace() else 0)
+                for glyph in candidate
             )
             if width <= max_width or not current:
                 current = candidate
@@ -356,7 +372,15 @@ def render_handwritten(project: ProjectDocument) -> bytes:
             y -= line_height * 0.55
         for block in source_page.blocks:
             font_size = persona_size * (1.17 if block.kind.value == "heading" else 1.0)
-            lines = _split_lines(block.text, font_name, font_size, max_width, parameters.tracking)
+            lines = _split_lines(
+                block.text,
+                font_name,
+                fallback_font_name,
+                font_size,
+                max_width,
+                parameters.tracking,
+                size_jitter=parameters.size_jitter,
+            )
             for line in lines:
                 if y < margin + line_height:
                     y = begin_sheet(source_page.number)
@@ -417,7 +441,7 @@ def render_companion(project: ProjectDocument) -> bytes:
         y -= line_height * 1.35
         for block in source_page.blocks:
             size = 11.5 if block.kind.value == "heading" else font_size
-            lines = _split_lines(block.text, font_name, size, max_width, 0)
+            lines = _split_lines(block.text, font_name, font_name, size, max_width, 0)
             pdf.setFillColor(Color(0.08, 0.09, 0.11))
             pdf.setFont(font_name, size)
             for line in lines:

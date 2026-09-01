@@ -165,6 +165,19 @@ export async function updateBlock(
   );
 }
 
+export async function reviewBlock(
+  projectId: string,
+  blockId: string,
+  expectedRevision: number,
+  signal?: AbortSignal,
+): Promise<ProjectDocument> {
+  return request<ProjectDocument>(
+    `/v1/projects/${encodeURIComponent(projectId)}/blocks/${encodeURIComponent(blockId)}/review`,
+    { method: "POST", body: JSON.stringify({ expectedRevision }) },
+    signal,
+  );
+}
+
 export async function updatePageText(
   projectId: string,
   pageNumber: number,
@@ -212,14 +225,13 @@ export async function fetchPngObjectUrl(
 export async function confirmProject(
   projectId: string,
   expectedRevision: number,
-  acknowledgedBlockIds: string[],
   signal?: AbortSignal,
 ): Promise<ProjectDocument> {
   return request<ProjectDocument>(
     `/v1/projects/${encodeURIComponent(projectId)}/confirm`,
     {
       method: "POST",
-      body: JSON.stringify({ expectedRevision, acknowledgedBlockIds }),
+      body: JSON.stringify({ expectedRevision }),
     },
     signal,
   );
