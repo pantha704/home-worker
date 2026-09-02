@@ -123,6 +123,30 @@ export class BrowserOpfsObjectStore implements LocalObjectStore {
     if (await sha256(bytes) !== digest) throw new Error("Committed local object failed integrity verification.");
     return bytes;
   }
+
+  async list(): Promise<string[]> {
+    const root = await navigator.storage.getDirectory();
+    const objects = await root.getDirectoryHandle("objects", { create: true });
+    const digests: string[] = [];
+    const prefixes = objects as FileSystemDirectoryHandle & {
+      values(): AsyncIterableIterator<FileSystemHandle & { values?: () => AsyncIterableIterator<FileSystemHandle> }>;
+    };
+    for await (const prefix of prefixes.values()) {
+      if (prefix.kind !== "directory" || !prefix.values) continue;
+      for await (const entry of prefix.values()) {
+        if (entry.kind === "file") digests.push(entry.name);
+      }
+    }
+    return digests;
+  }
+
+  async delete(digest: string): Promise<void> {
+    try {
+      await (await this.directory(digest)).removeEntry(digest);
+    } catch {
+      // already gone
+    }
+  }
 }
 
 let repository: LocalProjectRepository | undefined;
@@ -254,6 +278,7 @@ export async function createBrowserProject(
     options.onFinalizing?.();
     const project = await repo.create({ filename: file.name, mimeType, source, text, exportPdf: pdf });
     await repo.deleteCheckpoint(digest);
+    await repo.sweepOrphans();
     return project;
   }, options.locks);
 }

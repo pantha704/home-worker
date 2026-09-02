@@ -1,6 +1,8 @@
 export interface LocalObjectStore {
   put(digest: string, bytes: Uint8Array): Promise<void>;
   get(digest: string): Promise<Uint8Array>;
+  list?(): Promise<string[]>;
+  delete?(digest: string): Promise<void>;
 }
 
 interface ProjectRow {
@@ -253,6 +255,27 @@ export class LocalProjectRepository {
     transaction.objectStore("checkpoints").delete(digest);
     await complete(transaction);
     database.close();
+  }
+
+  async sweepOrphans(): Promise<number> {
+    if (!this.objects.list || !this.objects.delete) return 0;
+    const database = await this.database();
+    const transaction = database.transaction(["projects", "revisions"], "readonly");
+    const projects = await request(transaction.objectStore("projects").getAll()) as ProjectRow[];
+    const revisions = await request(transaction.objectStore("revisions").getAll()) as RevisionRow[];
+    await complete(transaction);
+    database.close();
+    const live = new Set<string>();
+    for (const project of projects) live.add(project.sourceDigest);
+    for (const revision of revisions) live.add(revision.exportDigest);
+    let removed = 0;
+    for (const digest of await this.objects.list()) {
+      if (!live.has(digest)) {
+        await this.objects.delete(digest);
+        removed += 1;
+      }
+    }
+    return removed;
   }
 
   private view(project: ProjectRow, revision: RevisionRow): LocalProject {
