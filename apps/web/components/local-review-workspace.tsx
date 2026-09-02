@@ -18,19 +18,28 @@ function download(bytes: Uint8Array, filename: string, type: string) {
 export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<LocalProject>();
   const [draft, setDraft] = useState("");
+  const [sourcePreview, setSourcePreview] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     let active = true;
+    let previewUrl: string | undefined;
     browserRepository().get(projectId)
-      .then((value) => {
+      .then(async (value) => {
         if (!active) return;
         setProject(value);
         setDraft(value.text);
+        const source = await browserRepository().readSource(value.id);
+        const blob = new Blob([source.slice()], { type: value.mimeType });
+        previewUrl = URL.createObjectURL(blob);
+        if (active) setSourcePreview(previewUrl);
       })
       .catch((reason) => active && setError(reason instanceof Error ? reason.message : "Local project unavailable."));
-    return () => { active = false; };
+    return () => {
+      active = false;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
   }, [projectId]);
 
   async function save() {
@@ -72,8 +81,15 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
       </header>
       <section className="review-layout">
         <article className="review-panel">
-          <span className="eyebrow">Text-layer extraction</span>
+          <span className="eyebrow">Source beside extracted text</span>
           <h2>Review before export</h2>
+          {sourcePreview ? (
+            project.mimeType === "application/pdf"
+              ? <object aria-label="Source document" className="source-preview" data={sourcePreview} type="application/pdf" />
+              : // Blob URLs are origin-private source bytes; next/image cannot optimize them.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img alt="Source page" className="source-preview" src={sourcePreview} />
+          ) : null}
           <label htmlFor="local-review-text">Review extracted text</label>
           <textarea id="local-review-text" onChange={(event) => setDraft(event.target.value)} rows={18} value={draft} />
           {error ? <p className="mutation-error" role="alert">{error}</p> : null}

@@ -1,6 +1,6 @@
 # Local-first production architecture
 
-Status: accepted direction; browser-local OCR, page checkpoints, and Chrome/Firefox acceptance are implemented. Safari is not proven.
+Status: accepted direction; browser-local OCR, page checkpoints, Chrome/Firefox acceptance, scanned-page OCR (≤10), and source-beside-text review are implemented. Safari is not proven.
 
 ## Decision
 

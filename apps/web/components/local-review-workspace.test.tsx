@@ -22,10 +22,14 @@ const project = {
 
 describe("LocalReviewWorkspace", () => {
   it("reopens a local revision and saves reviewed text", async () => {
-    vi.mocked(browserRepository).mockReturnValue({ get: vi.fn().mockResolvedValue(project) } as never);
+    vi.mocked(browserRepository).mockReturnValue({
+      get: vi.fn().mockResolvedValue(project),
+      readSource: vi.fn().mockResolvedValue(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37])),
+    } as never);
     vi.mocked(updateBrowserProject).mockResolvedValue({ ...project, revision: 2, text: "Reviewed wording" });
     const user = userEvent.setup();
     render(<LocalReviewWorkspace projectId="local_42" />);
+    expect(await screen.findByLabelText(/source document/i)).toBeInTheDocument();
     const editor = await screen.findByRole("textbox", { name: /review extracted text/i });
     await user.clear(editor);
     await user.type(editor, "Reviewed wording");
@@ -35,7 +39,10 @@ describe("LocalReviewWorkspace", () => {
   });
 
   it("regenerates an existing project's PDF without requiring a fake text edit", async () => {
-    vi.mocked(browserRepository).mockReturnValue({ get: vi.fn().mockResolvedValue(project) } as never);
+    vi.mocked(browserRepository).mockReturnValue({
+      get: vi.fn().mockResolvedValue(project),
+      readSource: vi.fn().mockResolvedValue(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37])),
+    } as never);
     vi.mocked(updateBrowserProject).mockResolvedValue({ ...project, revision: 2 });
     const user = userEvent.setup();
     render(<LocalReviewWorkspace projectId="local_42" />);

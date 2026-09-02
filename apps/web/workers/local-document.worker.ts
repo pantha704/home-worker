@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { extractTextPages, rasterizeFirstPdfPage, renderA4Pdf, sniffSource } from "@/lib/local-engine";
+import { extractTextPages, ocrEmptyPdfPages, rasterizePdfPage, renderA4Pdf, sniffSource } from "@/lib/local-engine";
 import { browserOcrAssets, extractImageText } from "@/lib/local-ocr";
 
 let handwritingFont: Promise<Uint8Array> | undefined;
@@ -34,19 +34,22 @@ async function extractSource(request: Extract<Request, { action: "process" }>): 
     self.postMessage({ kind: "progress", requestId: request.requestId, completed: 1, total: 1, text });
     return text;
   }
-  try {
-    const pages = await extractTextPages(request.source, (completed, total, text) => {
-      self.postMessage({ kind: "progress", requestId: request.requestId, completed, total, text });
-    }, request.resumeFrom ?? 1);
-    return [...prior, ...pages.map((page) => page.text)].join("\n\n");
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("no usable text layer")) throw error;
-    if (prior.length > 0) return prior.join("\n\n");
-    self.postMessage({ kind: "progress", requestId: request.requestId, completed: 0, total: 1 });
-    const text = await extractImageText(await rasterizeFirstPdfPage(request.source), assets);
-    self.postMessage({ kind: "progress", requestId: request.requestId, completed: 1, total: 1, text });
-    return text;
-  }
+  const pages = await extractTextPages(request.source, undefined, request.resumeFrom ?? 1, true);
+  const filled = await ocrEmptyPdfPages(pages, async (pageNumber) => (
+    extractImageText(await rasterizePdfPage(request.source, pageNumber), assets)
+  ));
+  const total = prior.length + filled.length;
+  const texts = filled.map((page) => page.text);
+  texts.forEach((text, index) => {
+    self.postMessage({
+      kind: "progress",
+      requestId: request.requestId,
+      completed: prior.length + index + 1,
+      total,
+      text,
+    });
+  });
+  return [...prior, ...texts].join("\n\n");
 }
 
 self.onmessage = async (event: MessageEvent<Request>) => {

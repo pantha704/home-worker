@@ -4,9 +4,9 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 // @ts-expect-error pdfjs-dist does not publish declarations for its worker entrypoint.
 import { WorkerMessageHandler } from "pdfjs-dist/legacy/build/pdf.worker.mjs";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import { extractTextPages, renderA4Pdf, sniffSource } from "@/lib/local-engine";
+import { extractTextPages, ocrEmptyPdfPages, renderA4Pdf, sniffSource } from "@/lib/local-engine";
 
 beforeAll(() => {
   Object.assign(globalThis, { pdfjsWorker: { WorkerMessageHandler } });
@@ -128,6 +128,34 @@ describe("browser-local PDF engine", () => {
     textPage.drawText("Usable", { x: 40, y: 700, size: 16, font });
     pdf.addPage();
     await expect(extractTextPages(await pdf.save())).rejects.toThrow("Page 2 has no usable text layer");
+  });
+
+  it("can return empty pages so the worker can OCR them", async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const textPage = pdf.addPage();
+    textPage.drawText("Usable", { x: 40, y: 700, size: 16, font });
+    pdf.addPage();
+    await expect(extractTextPages(await pdf.save(), undefined, 1, true)).resolves.toEqual([
+      { pageNumber: 1, text: "Usable" },
+      { pageNumber: 2, text: "" },
+    ]);
+  });
+
+  it("OCRs only empty pages and caps scanned-page count", async () => {
+    const ocrPage = vi.fn(async (pageNumber: number) => `OCR_PAGE_${pageNumber}`);
+    await expect(ocrEmptyPdfPages(
+      [{ pageNumber: 1, text: "Usable" }, { pageNumber: 2, text: "" }],
+      ocrPage,
+    )).resolves.toEqual([
+      { pageNumber: 1, text: "Usable" },
+      { pageNumber: 2, text: "OCR_PAGE_2" },
+    ]);
+    expect(ocrPage).toHaveBeenCalledOnce();
+    await expect(ocrEmptyPdfPages(
+      Array.from({ length: 11 }, (_, index) => ({ pageNumber: index + 1, text: "" })),
+      ocrPage,
+    )).rejects.toThrow("at most 10 scanned pages");
   });
 
   it("renders reviewed text into a real A4 PDF", async () => {
