@@ -34,12 +34,14 @@ const FIRST_BASELINE = 770;
 const BOTTOM_MARGIN = 56;
 const LINE_HEIGHT = 26;
 const FONT_SIZE = 18;
-const MAX_SOURCE_PAGES = 100;
+export const MAX_SOURCE_PAGES = 100;
+export const MAX_BROWSER_OCR_PAGES = 10;
 
 export async function extractTextPages(
   source: Uint8Array,
   onPage?: (pageNumber: number, totalPages: number, text: string) => void,
   startPage = 1,
+  allowEmpty = false,
 ): Promise<ExtractedTextPage[]> {
   const document = await getDocument({
     data: source.slice(),
@@ -83,7 +85,7 @@ export async function extractTextPages(
     const text = orderedLines
       .map((line) => line.map((item) => item.text).join(" "))
       .join("\n");
-    if (!text) throw new Error(`Page ${pageNumber} has no usable text layer.`);
+    if (!text && !allowEmpty) throw new Error(`Page ${pageNumber} has no usable text layer.`);
     pages.push({ pageNumber, text });
     onPage?.(pageNumber, document.numPages, text);
   }
@@ -151,19 +153,19 @@ export async function renderA4Pdf(text: string, fontBytes: Uint8Array): Promise<
   return document.save({ useObjectStreams: false });
 }
 
-export async function rasterizeFirstPdfPage(source: Uint8Array): Promise<Uint8Array> {
-  if (typeof OffscreenCanvas === "undefined") {
-    throw new Error("This browser cannot rasterize scanned PDFs.");
-  }
+export async function rasterizePdfPage(source: Uint8Array, pageNumber: number): Promise<Uint8Array> {
   const document = await getDocument({
     data: source.slice(),
     isEvalSupported: false,
     useWorkerFetch: false,
   }).promise;
-  if (document.numPages !== 1) {
-    throw new Error("Multi-page scanned PDFs are not enabled in browser OCR yet. Use a one-page scan or the full local application.");
+  if (pageNumber < 1 || pageNumber > document.numPages) {
+    throw new Error("That page is not in the source document.");
   }
-  const page = await document.getPage(1);
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new Error("This browser cannot rasterize scanned PDFs.");
+  }
+  const page = await document.getPage(pageNumber);
   const viewport = page.getViewport({ scale: 2 });
   const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
   const context = canvas.getContext("2d");
@@ -171,4 +173,23 @@ export async function rasterizeFirstPdfPage(source: Uint8Array): Promise<Uint8Ar
   await page.render({ canvas: canvas as unknown as HTMLCanvasElement, viewport }).promise;
   const blob = await canvas.convertToBlob({ type: "image/png" });
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+export async function ocrEmptyPdfPages(
+  pages: ExtractedTextPage[],
+  ocrPage: (pageNumber: number) => Promise<string>,
+): Promise<ExtractedTextPage[]> {
+  const missing = pages.filter((page) => page.text.trim() === "");
+  if (missing.length > MAX_BROWSER_OCR_PAGES) {
+    throw new Error(`Browser OCR supports at most ${MAX_BROWSER_OCR_PAGES} scanned pages. Use the full local application for longer scans.`);
+  }
+  const filled: ExtractedTextPage[] = [];
+  for (const page of pages) {
+    if (page.text.trim()) {
+      filled.push(page);
+      continue;
+    }
+    filled.push({ pageNumber: page.pageNumber, text: await ocrPage(page.pageNumber) });
+  }
+  return filled;
 }

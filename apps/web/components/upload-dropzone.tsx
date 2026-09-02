@@ -37,7 +37,7 @@ export function UploadDropzone() {
     if (!file) return;
     if (browserPreview && file.type !== "application/pdf" && file.type !== "image/png" && file.type !== "image/jpeg") {
       setSelectedFile(null);
-      setMessage("Browser-local processing supports PDF, PNG, and JPEG. Multi-page scanned PDFs still need the full local application.");
+      setMessage("Browser-local processing supports PDF, PNG, and JPEG. Scanned PDFs are limited to 10 OCR pages.");
       setState("error");
       return;
     }

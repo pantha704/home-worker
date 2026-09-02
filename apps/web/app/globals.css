@@ -2666,6 +2666,15 @@ label:has(input:focus-visible) {
   top: 90px;
 }
 
+.source-preview {
+  background: #fff;
+  border: 1px solid #d9d4c8;
+  height: 220px;
+  margin: 0 0 16px;
+  object-fit: contain;
+  width: 100%;
+}
+
 .notebook-preview {
   aspect-ratio: 210 / 297;
   background-color: #fffefa;

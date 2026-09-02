@@ -23,7 +23,7 @@ export default function HomePage() {
           <h1>From source pages to notes that <em>feel written.</em></h1>
           <p className="hero-lead">
             {preview
-              ? "Privately process text-layer PDFs, PNG, and JPEG in this browser. OCR is uncertain evidence—review the text before you print. Multi-page scans still need the full local application."
+              ? "Privately process text-layer PDFs, PNG, JPEG, and scanned PDFs (up to 10 OCR pages) in this browser. OCR is uncertain evidence—review the source beside the text before you print."
               : "Read PDFs and handwriting, review every uncertain detail, then lay it out in a fresh, licensed handwriting style—ready for A4 printing."}
           </p>
           <ul className="hero-checks" aria-label="Homeworker benefits">
