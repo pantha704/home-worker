@@ -19,6 +19,12 @@ class MemoryObjects implements LocalObjectStore {
     if (!value) throw new Error("missing object");
     return value.slice();
   }
+  async list() {
+    return [...this.values.keys()];
+  }
+  async delete(digest: string) {
+    this.values.delete(digest);
+  }
 }
 
 function bytes(value: string) {
@@ -110,5 +116,15 @@ describe("local project repository", () => {
     expect((await repo.getCheckpoint(digest))?.text).toContain("SECOND_PAGE_MARKER");
     await repo.deleteCheckpoint(digest);
     expect(await repo.getCheckpoint(digest)).toBeUndefined();
+  });
+
+  it("sweeps unreferenced objects without deleting live source or exports", async () => {
+    const objects = new MemoryObjects();
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
+    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("source"), text: "one", exportPdf: bytes("p1") });
+    await objects.put("deadbeef", bytes("orphan"));
+    expect(await repo.sweepOrphans()).toBe(1);
+    expect(objects.values.has("deadbeef")).toBe(false);
+    expect(await repo.readSource(project.id)).toEqual(bytes("source"));
   });
 });

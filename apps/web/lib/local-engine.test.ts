@@ -222,4 +222,10 @@ describe("browser-local PDF engine", () => {
   it("rejects unsupported image containers before OCR", () => {
     expect(() => sniffSource(new Uint8Array([0x47, 0x49, 0x46, 0x38]))).toThrow("supported source");
   });
+
+  it("rejects encrypted or active-content PDFs", () => {
+    expect(() => sniffSource(new TextEncoder().encode("%PDF-1.7\n1 0 obj<</Encrypt 2 0 R>>"))).toThrow("encryption or active content");
+    expect(() => sniffSource(new TextEncoder().encode("%PDF-1.7\n/JavaScript"))).toThrow("encryption or active content");
+    expect(() => sniffSource(new TextEncoder().encode("%PDF-1.7\n/Launch /EmbeddedFile"))).toThrow("encryption or active content");
+  });
 });

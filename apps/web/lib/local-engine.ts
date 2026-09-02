@@ -18,8 +18,18 @@ export function sniffSource(bytes: Uint8Array): LocalSourceType {
     return "image/jpeg";
   }
   const header = new TextDecoder("ascii").decode(bytes.subarray(0, Math.min(bytes.length, 1024)));
-  if (/^\s*%PDF-\d\.\d/.test(header)) return "application/pdf";
+  if (/^\s*%PDF-\d\.\d/.test(header)) {
+    rejectActivePdf(bytes);
+    return "application/pdf";
+  }
   throw new Error("This file is not a supported source. Use a PDF, PNG, or JPEG.");
+}
+
+export function rejectActivePdf(bytes: Uint8Array): void {
+  const sample = new TextDecoder("latin1").decode(bytes.subarray(0, Math.min(bytes.length, 1_048_576)));
+  if (/\/Encrypt\b/.test(sample) || /\/JavaScript\b/.test(sample) || /\/Launch\b/.test(sample) || /\/EmbeddedFiles?\b/.test(sample)) {
+    throw new Error("This PDF uses encryption or active content, which browser-local mode rejects.");
+  }
 }
 
 export interface ExtractedTextPage {
