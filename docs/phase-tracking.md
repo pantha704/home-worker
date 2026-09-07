@@ -26,7 +26,7 @@ Do not count existing capabilities as new work.
 | C2 Resource bounds | Upload/page caps; Compose isolation | Browser pixel/text caps; isolated parse process on Render | PNG dimension test; existing API page/upload tests | VERIFIED for in-process limits. Isolated parse process on Render **BLOCKED** |
 | D Hosted quotas/leases | SQLite unit tests | Real PostgreSQL concurrency | `test_postgres_concurrency.py` on Postgres 17 | VERIFIED locally. CI postgres service added. Live Supabase/Render still BLOCKED |
 | E Auth/privacy/ops | Code + unit tests | Two live accounts, backups | BLOCKED without vendor access | NOT STARTED |
-| F Scope/UX/Safari | Chrome+Firefox e2e | Safari/iOS, listing/deletion UX, OCR benchmark | Safari BLOCKED on Linux | NOT STARTED |
+| F Scope/UX/Safari | Chrome+Firefox e2e | Listing/deletion UX; OCR labelled evidence | recent-projects + local-review delete tests | VERIFIED (unit). Safari/iOS BLOCKED. OCR accuracy benchmark not run |
 | G Release/live beta | CI on GitHub | Owner branch protection, live drills, invite budget | BLOCKED pending owner | NOT STARTED |
 
 Statuses: `NOT STARTED`, `IN PROGRESS`, `VERIFIED`, `BLOCKED`.

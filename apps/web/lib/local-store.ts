@@ -271,6 +271,28 @@ export class LocalProjectRepository {
     return this.create({ filename: project.filename, mimeType, source, text: project.text, exportPdf: rendered });
   }
 
+  async delete(id: string): Promise<void> {
+    const database = await this.database();
+    const transaction = database.transaction(["projects", "revisions", "checkpoints"], "readwrite");
+    const project = (await request(transaction.objectStore("projects").get(id))) as ProjectRow | undefined;
+    if (!project) {
+      transaction.abort();
+      database.close();
+      throw new Error("Local project not found");
+    }
+    const revisions = (await request(transaction.objectStore("revisions").getAll())) as RevisionRow[];
+    for (const revision of revisions) {
+      if (revision.projectId === id) {
+        transaction.objectStore("revisions").delete(revision.key);
+      }
+    }
+    transaction.objectStore("projects").delete(id);
+    transaction.objectStore("checkpoints").delete(project.sourceDigest);
+    await complete(transaction);
+    database.close();
+    await this.sweepOrphans();
+  }
+
   async getCheckpoint(digest: string): Promise<LocalCheckpoint | undefined> {
     const database = await this.database();
     const transaction = database.transaction("checkpoints", "readonly");

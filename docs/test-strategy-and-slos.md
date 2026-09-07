@@ -15,7 +15,7 @@ No test can prove “flawless.” The quality goal is measurable: do not silentl
 | Corpus | Rights-cleared typed, scanned, handwritten, mixed layout, math/table/figure, multilingual, rotated/noisy, blank/corrupt documents with block-level truth |
 | Security | Malformed/polyglot/bomb files, XSS/prompt text, traversal/IDOR/CSRF/CORS, resource ceilings, container least privilege, dependency/secret scan |
 | Visual/print | Preview and PDF from one layout plan; page images and structural PDF checks; font embedding; clipping/overflow; physical A4 test |
-| End-to-end/accessibility | Keyboard-only upload/review/export, focus/errors, screen-reader labels, typed companion, supported browser flow |
+| End-to-end/accessibility | Keyboard-only upload/review/export, focus/errors, screen-reader labels, typed companion, Chrome and Firefox. Safari/iOS unproven |
 | Operations | Backup/restore, schema migration, interrupted job, disk-full behavior, crash cleanup, rollback rehearsal |
 
 ## Gold corpus and evaluation

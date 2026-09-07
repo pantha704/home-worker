@@ -316,6 +316,10 @@ export async function updateBrowserProject(projectId: string, expectedRevision: 
   return withPersistLock(() => browserRepository().updateText(projectId, expectedRevision, text, result.pdf));
 }
 
+export async function deleteBrowserProject(projectId: string): Promise<void> {
+  await withPersistLock(() => browserRepository().delete(projectId));
+}
+
 export async function importBrowserArchive(archive: Uint8Array | File): Promise<LocalProject> {
   if (archive instanceof File) {
     if (archive.size > MAX_ARCHIVE_BYTES) throw new Error("This backup is larger than the local restore limit.");

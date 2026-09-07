@@ -132,6 +132,30 @@ describe("local project repository", () => {
     expect(await repo.readSource(project.id)).toEqual(bytes("source"));
   });
 
+  it("deletes a project, its revisions, and unreferenced objects", async () => {
+    const objects = new MemoryObjects();
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
+    const keep = await repo.create({
+      filename: "keep.pdf",
+      mimeType: "application/pdf",
+      source: bytes("keep-source"),
+      text: "keep",
+      exportPdf: bytes("keep-pdf"),
+    });
+    const gone = await repo.create({
+      filename: "gone.pdf",
+      mimeType: "application/pdf",
+      source: bytes("gone-source"),
+      text: "gone",
+      exportPdf: bytes("gone-pdf"),
+    });
+    await repo.delete(gone.id);
+    await expect(repo.get(gone.id)).rejects.toThrow("Local project not found");
+    expect(await repo.get(keep.id)).toMatchObject({ filename: "keep.pdf", text: "keep" });
+    expect(await repo.readSource(keep.id)).toEqual(bytes("keep-source"));
+    expect(objects.values.size).toBe(2);
+  });
+
   it("does not sweep objects written before metadata commit", async () => {
     const objects = new MemoryObjects();
     const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);

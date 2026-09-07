@@ -710,6 +710,15 @@ label:has(input:focus-visible) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.recent-item {
+  display: grid;
+  gap: 8px;
+}
+
+.recent-delete {
+  justify-self: start;
+}
+
 .recent-card {
   align-items: center;
   background: var(--paper);

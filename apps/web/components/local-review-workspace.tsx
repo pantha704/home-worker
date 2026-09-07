@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { browserRepository, updateBrowserProject } from "@/lib/browser-local";
+import { browserRepository, deleteBrowserProject, updateBrowserProject } from "@/lib/browser-local";
+import { forgetProject } from "@/lib/recent-projects";
 import { backupDownloadName, reviewedPdfDownloadName, type LocalProject } from "@/lib/local-store";
 
 function download(bytes: Uint8Array, filename: string, type: string) {
@@ -16,6 +18,7 @@ function download(bytes: Uint8Array, filename: string, type: string) {
 }
 
 export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
+  const router = useRouter();
   const [project, setProject] = useState<LocalProject>();
   const [draft, setDraft] = useState("");
   const [sourcePreview, setSourcePreview] = useState<string>();
@@ -67,6 +70,21 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
     download(await browserRepository().exportArchive(project.id), backupDownloadName(project.filename), "application/vnd.homeworker.project+json");
   }
 
+  async function removeProject() {
+    if (!project) return;
+    if (!window.confirm(`Delete “${project.filename}” from this browser? This cannot be undone.`)) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await deleteBrowserProject(project.id);
+      forgetProject(project.id);
+      router.push("/");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The local project could not be deleted.");
+      setBusy(false);
+    }
+  }
+
   if (error && !project) return <main className="centered-state"><h1>Local project unavailable</h1><p>{error}</p><Link href="/">Return home</Link></main>;
   if (!project) return <main className="centered-state"><span className="spinner spinner-large" /><h1>Opening local project…</h1></main>;
 
@@ -109,6 +127,7 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
           <p className="preview-help">This preview is not the print PDF. Save a revision to regenerate the downloadable file from the saved text.</p>
           <button className="button button-primary button-wide" disabled={dirty} onClick={() => void downloadPdf()} type="button">Download A4 PDF</button>
           <button className="button button-secondary button-wide" disabled={dirty} onClick={() => void exportArchive()} type="button">Export .homeworker backup</button>
+          <button className="button button-ghost button-wide" disabled={busy} onClick={() => void removeProject()} type="button">Delete project</button>
         </aside>
       </section>
     </main>

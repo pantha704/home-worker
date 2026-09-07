@@ -339,7 +339,7 @@ Mode selection policy:
 
 ### Gate 0 — architecture spike
 
-- Prove OPFS/IndexedDB transactions and archive round-trip on current Chrome, Edge, Firefox, Safari, Android Chrome, and iOS Safari.
+- Prove OPFS/IndexedDB transactions and archive round-trip on current Chrome and Firefox. Safari, iOS Safari, Android Chrome, and Edge are unproven — do not claim support.
 - Test normal and private modes, persistence denied/granted, quota exhaustion, storage pressure, and site-data clearing.
 - Benchmark native PDF extraction, rasterization, OCR, review preview, and export on low/mid/high devices.
 - Compare browser output with the current Python corpus; record accuracy and deterministic differences.
