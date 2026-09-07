@@ -20,8 +20,8 @@ Do not count existing capabilities as new work.
 | A1 Resume, version, expiry, out-of-order | Resume from `pages.length+1` | Bind `extractionVersion`; 24h TTL; reject gaps | incompatible + expired tests | VERIFIED |
 | A2 Shared persist lock / inflight objects | Distinct locks; sweep after create; objects before metadata | One `homeworker:persist` lock; OCR/render outside it; inflight digests; cleanup errors do not fail create; NotFound-only delete swallow | inflight sweep + persist lock + cleanup error | VERIFIED (jsdom). Real two-tab Playwright **not run** |
 | A3 Archive size/type/hash/policy | Digest check + mime allowlist; read whole File first | Size gate before read; sniff source; decoded size; backup filename stem | archive tests | VERIFIED |
-| B1 Review semantics | Hosted explicit block review; browser preview is whole-text draft | Verify hosted; label browser limits | existing review-workspace tests | NOT STARTED |
-| B2 Rendering fidelity | Fallback-font measurement; overflow regression exists | Full persona/glyph/visual gate | renderer tests | NOT STARTED |
+| B1 Review semantics | Hosted explicit block review; confirm ignores acknowledgement lists | Save all page drafts before confirm; browser preview labelled unverified; dirty downloads blocked | review-workspace + local-review tests | VERIFIED (unit). Visual/a11y not re-run |
+| B2 Rendering fidelity | Server fallback glyphs + overflow tests; browser overflow tests | Browser renderer fails closed on missing glyphs | local-engine ₹ test; existing API glyph tests | VERIFIED (unit). Full persona visual inspection **not run** |
 | C1 PDF structure policy | 1 MiB keyword scan | Parsed-structure inspection | Phase C | NOT STARTED |
 | C2 Resource bounds | Upload/page caps in browser and API | Isolated parse process on real host | Phase C | NOT STARTED |
 | D Hosted quotas/leases | Code + unit tests | Real PostgreSQL concurrency | BLOCKED without hosted DB | NOT STARTED |

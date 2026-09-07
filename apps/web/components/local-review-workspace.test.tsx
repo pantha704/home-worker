@@ -52,4 +52,21 @@ describe("LocalReviewWorkspace", () => {
     expect(updateBrowserProject).toHaveBeenCalledWith("local_42", 1, "Original wording");
     expect(await screen.findByText(/revision 2/i)).toBeInTheDocument();
   });
+
+  it("labels browser preview as unverified and blocks download while a draft is unsaved", async () => {
+    vi.mocked(browserRepository).mockReturnValue({
+      get: vi.fn().mockResolvedValue(project),
+      readSource: vi.fn().mockResolvedValue(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37])),
+      readExport: vi.fn(),
+      exportArchive: vi.fn(),
+    } as never);
+    const user = userEvent.setup();
+    render(<LocalReviewWorkspace projectId="local_42" />);
+    expect(await screen.findByText(/limited browser preview/i)).toBeVisible();
+    const editor = await screen.findByRole("textbox", { name: /review extracted text/i });
+    await user.clear(editor);
+    await user.type(editor, "Unsaved draft");
+    expect(screen.getByRole("button", { name: /download a4 pdf/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /export \.homeworker backup/i })).toBeDisabled();
+  });
 });

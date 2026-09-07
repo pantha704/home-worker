@@ -42,6 +42,8 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
     };
   }, [projectId]);
 
+  const dirty = Boolean(project && draft !== project.text);
+
   async function save() {
     if (!project) return;
     setBusy(true);
@@ -74,7 +76,7 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
         <div className="toolbar-left">
           <div className="project-title-group">
             <strong>{project.filename}</strong>
-            <span>Revision {project.revision} · private to this browser</span>
+            <span>Revision {project.revision} · limited browser preview</span>
           </div>
         </div>
         <Link className="button button-ghost" href="/">Home</Link>
@@ -82,7 +84,8 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
       <section className="review-layout">
         <article className="review-panel">
           <span className="eyebrow">Source beside extracted text</span>
-          <h2>Review before export</h2>
+          <h2>Review extracted text</h2>
+          <p className="preview-help">This browser preview is whole-document text only. It is not the per-block OCR review used by the local service or hosted beta, and the download is not a fully verified export.</p>
           {sourcePreview ? (
             project.mimeType === "application/pdf"
               ? <object aria-label="Source document" className="source-preview" data={sourcePreview} type="application/pdf" />
@@ -103,9 +106,9 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
           <div aria-label="Handwritten A4 preview" className="notebook-preview">
             <p>{draft || "Your reviewed text will appear here."}</p>
           </div>
-          <p className="preview-help">This preview follows the handwriting, spacing, and ruled-paper style of the export. Save a revision to regenerate the downloadable PDF.</p>
-          <button className="button button-primary button-wide" onClick={() => void downloadPdf()} type="button">Download A4 PDF</button>
-          <button className="button button-secondary button-wide" onClick={() => void exportArchive()} type="button">Export .homeworker backup</button>
+          <p className="preview-help">This preview is not the print PDF. Save a revision to regenerate the downloadable file from the saved text.</p>
+          <button className="button button-primary button-wide" disabled={dirty} onClick={() => void downloadPdf()} type="button">Download A4 PDF</button>
+          <button className="button button-secondary button-wide" disabled={dirty} onClick={() => void exportArchive()} type="button">Export .homeworker backup</button>
         </aside>
       </section>
     </main>

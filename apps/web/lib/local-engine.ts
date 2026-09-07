@@ -1,5 +1,5 @@
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 GlobalWorkerOptions.workerSrc = new URL(
@@ -30,6 +30,21 @@ export function rejectActivePdf(bytes: Uint8Array): void {
   if (/\/Encrypt\b/.test(sample) || /\/JavaScript\b/.test(sample) || /\/Launch\b/.test(sample) || /\/EmbeddedFiles?\b/.test(sample)) {
     throw new Error("This PDF uses encryption or active content, which browser-local mode rejects.");
   }
+}
+
+function unsupportedGlyphs(font: PDFFont, text: string): string[] {
+  const lookup = (font as unknown as { embedder?: { font?: { hasGlyphForCodePoint?: (code: number) => boolean } } }).embedder?.font;
+  if (!lookup?.hasGlyphForCodePoint) {
+    throw new Error("This handwriting font cannot be inspected for supported glyphs.");
+  }
+  const missing: string[] = [];
+  for (const character of text) {
+    if (character === "\n" || character === "\r" || character === "\t" || character === " ") continue;
+    const code = character.codePointAt(0);
+    if (code === undefined) continue;
+    if (!lookup.hasGlyphForCodePoint(code)) missing.push(`U+${code.toString(16).toUpperCase().padStart(4, "0")}`);
+  }
+  return missing;
 }
 
 export interface ExtractedTextPage {
@@ -106,6 +121,10 @@ export async function renderA4Pdf(text: string, fontBytes: Uint8Array): Promise<
   const document = await PDFDocument.create();
   document.registerFontkit(fontkit);
   const font = await document.embedFont(new Uint8Array(fontBytes), { subset: true });
+  const missing = unsupportedGlyphs(font, text);
+  if (missing.length > 0) {
+    throw new Error(`This handwriting font cannot render ${missing[0]}.`);
+  }
   const maxWidth = A4_WIDTH - HORIZONTAL_MARGIN * 2;
   const linesPerPage = Math.floor((FIRST_BASELINE - BOTTOM_MARGIN) / LINE_HEIGHT) + 1;
   const lines: string[] = [];

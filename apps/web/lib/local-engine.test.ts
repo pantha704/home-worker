@@ -213,6 +213,11 @@ describe("browser-local PDF engine", () => {
     expect(rendered.replace(/\s+/g, "")).toBe(token);
   });
 
+  it("fails visibly when the handwriting font cannot render a glyph", async () => {
+    const fontBytes = await readFile("../../assets/fonts/Kalam-Regular.ttf");
+    await expect(renderA4Pdf("Price ₹100", fontBytes)).rejects.toThrow(/cannot render|UNSUPPORTED/i);
+  });
+
   it("sniffs PDF, PNG, and JPEG magic bytes", () => {
     expect(sniffSource(new TextEncoder().encode("%PDF-1.7"))).toBe("application/pdf");
     expect(sniffSource(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe("image/png");
