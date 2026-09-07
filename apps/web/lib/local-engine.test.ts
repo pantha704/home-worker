@@ -6,7 +6,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { WorkerMessageHandler } from "pdfjs-dist/legacy/build/pdf.worker.mjs";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import { extractTextPages, ocrEmptyPdfPages, renderA4Pdf, sniffSource } from "@/lib/local-engine";
+import { assertImagePixelLimit, extractTextPages, ocrEmptyPdfPages, renderA4Pdf, sniffSource } from "@/lib/local-engine";
 
 beforeAll(() => {
   Object.assign(globalThis, { pdfjsWorker: { WorkerMessageHandler } });
@@ -213,6 +213,11 @@ describe("browser-local PDF engine", () => {
     expect(rendered.replace(/\s+/g, "")).toBe(token);
   });
 
+  it("fails visibly when the handwriting font cannot render a glyph", async () => {
+    const fontBytes = await readFile("../../assets/fonts/Kalam-Regular.ttf");
+    await expect(renderA4Pdf("Price ₹100", fontBytes)).rejects.toThrow(/cannot render|UNSUPPORTED/i);
+  });
+
   it("sniffs PDF, PNG, and JPEG magic bytes", () => {
     expect(sniffSource(new TextEncoder().encode("%PDF-1.7"))).toBe("application/pdf");
     expect(sniffSource(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe("image/png");
@@ -223,9 +228,26 @@ describe("browser-local PDF engine", () => {
     expect(() => sniffSource(new Uint8Array([0x47, 0x49, 0x46, 0x38]))).toThrow("supported source");
   });
 
-  it("rejects encrypted or active-content PDFs", () => {
-    expect(() => sniffSource(new TextEncoder().encode("%PDF-1.7\n1 0 obj<</Encrypt 2 0 R>>"))).toThrow("encryption or active content");
-    expect(() => sniffSource(new TextEncoder().encode("%PDF-1.7\n/JavaScript"))).toThrow("encryption or active content");
-    expect(() => sniffSource(new TextEncoder().encode("%PDF-1.7\n/Launch /EmbeddedFile"))).toThrow("encryption or active content");
+  it("does not reject PDFs that only mention active-content keywords in visible text", async () => {
+    const bytes = await textPdf("Notes about JavaScript and /Launch /Encrypt /EmbeddedFile");
+    expect(sniffSource(bytes)).toBe("application/pdf");
+    const pages = await extractTextPages(bytes);
+    expect(pages[0]?.text).toContain("JavaScript");
+  });
+
+  it("rejects PDFs with JavaScript actions after parsing", async () => {
+    const pdf = await PDFDocument.create();
+    pdf.addPage([400, 600]);
+    pdf.addJavaScript("main", "app.alert('x');");
+    await expect(extractTextPages(await pdf.save())).rejects.toThrow("active content");
+  });
+
+  it("rejects oversized PNG dimensions before OCR", () => {
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52,
+      0, 0, 0xff, 0xff, 0, 0, 0xff, 0xff,
+    ]);
+    expect(() => assertImagePixelLimit(png)).toThrow("too large");
   });
 });

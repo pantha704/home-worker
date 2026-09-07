@@ -89,4 +89,45 @@ describe("ReviewWorkspace page submit gate", () => {
     expect(confirmProject).not.toHaveBeenCalled();
     expect(editor).toHaveValue("unsaved correction");
   });
+
+  it("saves unsaved drafts on every page before confirm", async () => {
+    const page = (text: string, id: string, number: number) => ({
+      ...makeProject().pages[0],
+      number,
+      blocks: [{
+        ...makeProject().pages[0].blocks[0],
+        id,
+        text,
+        reviewed: true,
+        confidence: 1,
+        warnings: [],
+        source: { ...makeProject().pages[0].blocks[0].source, pageNumber: number },
+      }],
+    });
+    const twoPage = makeProject({
+      revision: 3,
+      pages: [page("Page one extracted", "block-1", 1), page("Page two extracted", "block-2", 2)],
+    });
+    vi.mocked(getProject).mockReset().mockResolvedValue(twoPage);
+    vi.mocked(updatePageText)
+      .mockResolvedValueOnce(makeProject({ revision: 4, pages: twoPage.pages }))
+      .mockResolvedValueOnce(makeProject({ revision: 5, pages: twoPage.pages }));
+    vi.mocked(confirmProject).mockResolvedValue(makeProject({ status: "ready", revision: 6, pages: twoPage.pages }));
+    const user = userEvent.setup();
+    render(<ReviewWorkspace projectId="project-42" />);
+
+    const editor = await screen.findByRole("textbox", { name: /extracted text for page 1/i });
+    await user.clear(editor);
+    await user.type(editor, "Page one edited");
+    await user.click(screen.getByRole("button", { name: /next/i }));
+    const pageTwo = await screen.findByRole("textbox", { name: /extracted text for page 2/i });
+    await user.clear(pageTwo);
+    await user.type(pageTwo, "Page two edited");
+    await user.click(screen.getByRole("button", { name: /submit for handwriting/i }));
+
+    await waitFor(() => expect(updatePageText).toHaveBeenCalledTimes(2));
+    expect(updatePageText).toHaveBeenNthCalledWith(1, "project-42", 1, "Page one edited", 3);
+    expect(updatePageText).toHaveBeenNthCalledWith(2, "project-42", 2, "Page two edited", 4);
+    await waitFor(() => expect(confirmProject).toHaveBeenCalledWith("project-42", 5));
+  });
 });

@@ -129,6 +129,16 @@ def test_final_artifacts_require_completed_review(
     assert preview.headers["content-type"].startswith("image/png")
 
 
+def test_confirm_ignores_caller_supplied_acknowledgement_ids(
+    client: TestClient, created_project: dict
+) -> None:
+    response = client.post(
+        f"/v1/projects/{created_project['id']}/confirm",
+        json={"expectedRevision": 1, "acknowledgedBlockIds": ["block-1"]},
+    )
+    assert response.status_code == 422
+
+
 def test_personas_and_deterministic_a4_exports(client: TestClient, created_project: dict) -> None:
     personas = client.get("/v1/personas")
     assert personas.status_code == 200

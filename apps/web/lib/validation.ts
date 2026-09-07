@@ -8,6 +8,7 @@ const SUPPORTED_EXTENSIONS = new Set(["pdf", "png", "jpg", "jpeg"]);
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const HOSTED_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_ARCHIVE_BYTES = 80 * 1024 * 1024;
 
 export interface FileValidationResult {
   valid: boolean;

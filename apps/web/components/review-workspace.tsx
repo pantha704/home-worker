@@ -133,7 +133,7 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
   }
 
   async function saveCurrentPage() {
-    if (!project || !currentPage) return null;
+    if (!project || !currentPage || busyAction !== null) return null;
     setBusyAction(`page:${currentPage.number}`);
     setMutationError(null);
     try {
@@ -205,17 +205,24 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
   }
 
   async function submitReview() {
-    if (!project) return;
+    if (!project || busyAction !== null) return;
     setBusyAction("confirm");
     setMutationError(null);
     try {
       let revision = project.revision;
-      if (currentPage && (drafts[currentPage.number] ?? pagePlainText(currentPage)) !== pagePlainText(currentPage)) {
-        const saved = await saveCurrentPage();
-        if (!saved) return;
-        revision = saved.revision;
+      let latest = project;
+      const dirtyPages = pages.filter((page) => (drafts[page.number] ?? pagePlainText(page)) !== pagePlainText(page));
+      for (const page of dirtyPages) {
+        latest = await updatePageText(latest.id, page.number, drafts[page.number] ?? pagePlainText(page), revision);
+        revision = latest.revision;
+        setProject(latest);
+        setDrafts((current) => {
+          const copy = { ...current };
+          delete copy[page.number];
+          return copy;
+        });
       }
-      const next = await confirmProject(project.id, revision);
+      const next = await confirmProject(latest.id, revision);
       setProject(next);
       setStage("finalize");
     } catch (error) {

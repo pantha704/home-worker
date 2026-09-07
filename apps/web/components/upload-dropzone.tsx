@@ -13,6 +13,7 @@ import { rememberProject } from "@/lib/recent-projects";
 import {
   formatFileSize,
   HOSTED_MAX_UPLOAD_BYTES,
+  MAX_ARCHIVE_BYTES,
   MAX_UPLOAD_BYTES,
   validateUpload,
 } from "@/lib/validation";
@@ -108,10 +109,15 @@ export function UploadDropzone() {
 
   async function restoreArchive(file: File | undefined) {
     if (!file) return;
+    if (file.size > MAX_ARCHIVE_BYTES) {
+      setMessage("This backup is larger than the local restore limit.");
+      setState("error");
+      return;
+    }
     setState("uploading");
     setMessage("Verifying and restoring the local backup…");
     try {
-      const project = await importBrowserArchive(new Uint8Array(await file.arrayBuffer()));
+      const project = await importBrowserArchive(file);
       rememberProject({ id: project.id, filename: project.filename, updatedAt: project.updatedAt });
       router.push(`/project?id=${encodeURIComponent(project.id)}`);
     } catch (error) {

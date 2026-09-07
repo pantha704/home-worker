@@ -10,7 +10,7 @@ The provided local stack requires no cloud service or API key. Its default ports
 - A current Docker Engine/Desktop with Compose v2.
 - 4 CPU cores, 8 GiB RAM, and 10 GiB free disk for a comfortable initial OCR workflow; smaller files may work with less.
 - Enough additional encrypted storage for originals, temporary rasterization, exports, and backups.
-- Git and a supported browser.
+- Git and Chrome or Firefox. Safari and iOS are not proven.
 
 ## Local setup
 

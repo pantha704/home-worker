@@ -20,6 +20,18 @@ from .errors import InkError
 ALLOWED_MIME_TYPES = frozenset({"application/pdf", "image/png", "image/jpeg"})
 EXTENSIONS = {"application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg"}
 CHUNK_SIZE = 1024 * 1024
+ACTIVE_ACTION_TYPES = frozenset(
+    {
+        "/JavaScript",
+        "/JS",
+        "/Launch",
+        "/SubmitForm",
+        "/ImportData",
+        "/GoToR",
+        "/RichMedia",
+        "/EmbeddedFile",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +133,54 @@ async def store_upload(upload: UploadFile, settings: Settings) -> StoredUpload:
         await upload.close()
 
 
+def reject_active_pdf(document: fitz.Document) -> None:
+    """Reject parsed encryption, JavaScript, launch, and embedded-file actions.
+
+    Visible text that merely mentions those keywords is ignored. URI annotations
+    are ignored because this service does not follow links. Validation does not
+    remove parser-isolation risk.
+    """
+    if document.embfile_count() > 0:
+        raise InkError(
+            "ACTIVE_PDF",
+            "PDFs with embedded files or active content are not supported.",
+            status_code=422,
+        )
+    for page in document:
+        for link in page.get_links():
+            if link.get("kind") in {fitz.LINK_LAUNCH, fitz.LINK_GOTOR}:
+                raise InkError(
+                    "ACTIVE_PDF",
+                    "PDFs with embedded files or active content are not supported.",
+                    status_code=422,
+                    details={"action": str(link.get("kind"))},
+                )
+    for xref in range(1, document.xref_length()):
+        try:
+            kind, value = document.xref_get_key(xref, "S")
+        except (RuntimeError, ValueError):
+            kind, value = "null", "null"
+        if kind == "name" and value in ACTIVE_ACTION_TYPES:
+            raise InkError(
+                "ACTIVE_PDF",
+                "PDFs with embedded files or active content are not supported.",
+                status_code=422,
+                details={"action": value},
+            )
+        try:
+            raw = document.xref_object(xref, compressed=False)
+        except (RuntimeError, ValueError):
+            continue
+        for action in ACTIVE_ACTION_TYPES:
+            if f"/S {action}" in raw or f"/S{action}" in raw:
+                raise InkError(
+                    "ACTIVE_PDF",
+                    "PDFs with embedded files or active content are not supported.",
+                    status_code=422,
+                    details={"action": action},
+                )
+
+
 def validate_document(path: Path, mime_type: str, settings: Settings) -> None:
     if mime_type == "application/pdf":
         try:
@@ -143,6 +203,7 @@ def validate_document(path: Path, mime_type: str, settings: Settings) -> None:
                             "maxPages": settings.max_pdf_pages,
                         },
                     )
+                reject_active_pdf(document)
                 for page in document:
                     if page.rect.width <= 0 or page.rect.height <= 0:
                         raise InkError(

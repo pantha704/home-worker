@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   LocalProjectRepository,
   LocalRevisionConflictError,
+  backupDownloadName,
+  reviewedPdfDownloadName,
   type LocalObjectStore,
 } from "@/lib/local-store";
 
@@ -59,7 +61,7 @@ describe("local project repository", () => {
   it("exports and imports a digest-verified portable archive", async () => {
     const objects = new MemoryObjects();
     const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
-    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("source"), text: "reviewed", exportPdf: bytes("rendered") });
+    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("%PDF-1.7\n"), text: "reviewed", exportPdf: bytes("rendered") });
     const archive = await repo.exportArchive(project.id);
     const importedRepo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
     const imported = await importedRepo.importArchive(archive);
@@ -85,7 +87,7 @@ describe("local project repository", () => {
 
   it("rejects an archive whose mimeType is not a supported source", async () => {
     const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
-    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("source"), text: "reviewed", exportPdf: bytes("rendered") });
+    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("%PDF-1.7\n"), text: "reviewed", exportPdf: bytes("rendered") });
     const archive = JSON.parse(new TextDecoder().decode(await repo.exportArchive(project.id))) as { project: { mimeType: string } };
     archive.project.mimeType = "image/gif";
     await expect(repo.importArchive(new TextEncoder().encode(JSON.stringify(archive)))).rejects.toThrow("Unsupported Homeworker archive");
@@ -101,6 +103,7 @@ describe("local project repository", () => {
       mimeType: "application/pdf",
       pages: ["FIRST_PAGE_MARKER"],
       total: 3,
+      extractionVersion: 1,
       updatedAt: new Date().toISOString(),
     });
     expect(await repo.getCheckpoint(digest)).toMatchObject({ pages: ["FIRST_PAGE_MARKER"], total: 3 });
@@ -111,6 +114,7 @@ describe("local project repository", () => {
       pages: ["FIRST_PAGE_MARKER", "SECOND_PAGE_MARKER"],
       total: 3,
       text: "FIRST_PAGE_MARKER\n\nSECOND_PAGE_MARKER",
+      extractionVersion: 1,
       updatedAt: new Date().toISOString(),
     });
     expect((await repo.getCheckpoint(digest))?.text).toContain("SECOND_PAGE_MARKER");
@@ -126,5 +130,98 @@ describe("local project repository", () => {
     expect(await repo.sweepOrphans()).toBe(1);
     expect(objects.values.has("deadbeef")).toBe(false);
     expect(await repo.readSource(project.id)).toEqual(bytes("source"));
+  });
+
+  it("deletes a project, its revisions, and unreferenced objects", async () => {
+    const objects = new MemoryObjects();
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
+    const keep = await repo.create({
+      filename: "keep.pdf",
+      mimeType: "application/pdf",
+      source: bytes("keep-source"),
+      text: "keep",
+      exportPdf: bytes("keep-pdf"),
+    });
+    const gone = await repo.create({
+      filename: "gone.pdf",
+      mimeType: "application/pdf",
+      source: bytes("gone-source"),
+      text: "gone",
+      exportPdf: bytes("gone-pdf"),
+    });
+    await repo.delete(gone.id);
+    await expect(repo.get(gone.id)).rejects.toThrow("Local project not found");
+    expect(await repo.get(keep.id)).toMatchObject({ filename: "keep.pdf", text: "keep" });
+    expect(await repo.readSource(keep.id)).toEqual(bytes("keep-source"));
+    expect(objects.values.size).toBe(2);
+  });
+
+  it("does not sweep objects written before metadata commit", async () => {
+    const objects = new MemoryObjects();
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
+    const originalPut = objects.put.bind(objects);
+    objects.put = async (digest: string, value: Uint8Array) => {
+      await originalPut(digest, value);
+      await repo.sweepOrphans();
+    };
+    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("source"), text: "one", exportPdf: bytes("p1") });
+    expect(await repo.readSource(project.id)).toEqual(bytes("source"));
+    expect(await repo.readExport(project.id)).toEqual(bytes("p1"));
+  });
+
+  it("keeps historical export objects after a later revision", async () => {
+    const objects = new MemoryObjects();
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
+    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("source"), text: "one", exportPdf: bytes("p1") });
+    await repo.updateText(project.id, 1, "two", bytes("p2"));
+    expect(await repo.sweepOrphans()).toBe(0);
+    expect(objects.values.size).toBe(3);
+  });
+
+  it("discards expired or incompatible checkpoints", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    await repo.saveCheckpoint({
+      digest: "abc",
+      filename: "notes.pdf",
+      mimeType: "application/pdf",
+      pages: ["P1"],
+      total: 2,
+      extractionVersion: 0,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(await repo.getCheckpoint("abc")).toBeUndefined();
+    await repo.saveCheckpoint({
+      digest: "def",
+      filename: "notes.pdf",
+      mimeType: "application/pdf",
+      pages: ["P1"],
+      total: 2,
+      extractionVersion: 1,
+      updatedAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+    });
+    expect(await repo.getCheckpoint("def")).toBeUndefined();
+  });
+
+  it("rejects archives whose bytes do not match the declared type or active-PDF policy", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const project = await repo.create({ filename: "notes.png", mimeType: "image/png", source: png, text: "reviewed", exportPdf: bytes("rendered") });
+    const archive = JSON.parse(new TextDecoder().decode(await repo.exportArchive(project.id))) as {
+      project: { mimeType: string };
+      objects: { source: { digest: string; data: string } };
+    };
+    archive.project.mimeType = "application/pdf";
+    await expect(repo.importArchive(new TextEncoder().encode(JSON.stringify(archive)))).rejects.toThrow("does not match");
+  });
+
+  it("rejects oversized archives before parsing JSON", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    await expect(repo.importArchive(new Uint8Array(80 * 1024 * 1024 + 1))).rejects.toThrow("backup is larger");
+  });
+
+  it("keeps the original filename stem in backup and PDF download names", () => {
+    expect(backupDownloadName("notes.png")).toBe("notes.homeworker");
+    expect(backupDownloadName("notes.PDF")).toBe("notes.homeworker");
+    expect(reviewedPdfDownloadName("notes.png")).toBe("notes-reviewed.pdf");
   });
 });

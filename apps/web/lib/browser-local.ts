@@ -1,6 +1,6 @@
-import { LocalProjectRepository, sha256, type LocalObjectStore, type LocalProject } from "@/lib/local-store";
+import { EXTRACTION_VERSION, LocalProjectRepository, sha256, type LocalObjectStore, type LocalProject } from "@/lib/local-store";
 import { sniffSource } from "@/lib/local-engine";
-import { MAX_UPLOAD_BYTES } from "@/lib/validation";
+import { MAX_ARCHIVE_BYTES, MAX_UPLOAD_BYTES } from "@/lib/validation";
 
 interface StorageGate {
   estimate(): Promise<StorageEstimate>;
@@ -22,9 +22,10 @@ interface WorkerRequestOptions {
   createWorker?: () => Worker;
   requestId?: string;
   signal?: AbortSignal;
-  onProgress?: (progress: { completed: number; total: number; text?: string }) => void;
+  onProgress?: (progress: { completed: number; total: number; text?: string }) => void | Promise<void>;
   onProcessing?: () => void;
   onFinalizing?: () => void;
+  onCleanupError?: (error: Error) => void;
   resumeFrom?: number;
   priorPages?: string[];
   repository?: LocalProjectRepository;
@@ -53,6 +54,7 @@ function isWorkerProgress(value: unknown): value is WorkerProgress {
 const DB_NAME = "homeworker-local-v1";
 const RESERVE_BYTES = 10 * 1024 * 1024;
 const WORKER_TIMEOUT_MS = 120_000;
+export const PERSIST_LOCK = "homeworker:persist";
 
 export function validateLocalPdfSource(source: Uint8Array): void {
   if (source.length > MAX_UPLOAD_BYTES) throw new Error("This PDF is larger than the 25 MB local limit.");
@@ -83,12 +85,19 @@ export async function ensureStorageCapacity(sourceBytes: number, storage: Storag
 }
 
 export async function withProjectLock<T>(
-  projectId: string,
+  _projectId: string,
+  operation: () => Promise<T>,
+  locks: LockManager | undefined = navigator.locks,
+): Promise<T> {
+  return withPersistLock(operation, locks);
+}
+
+export async function withPersistLock<T>(
   operation: () => Promise<T>,
   locks: LockManager | undefined = navigator.locks,
 ): Promise<T> {
   if (!locks) throw new Error("This browser cannot provide safe exclusive locking for local projects.");
-  return locks.request(`homeworker:${projectId}`, { mode: "exclusive" }, operation);
+  return locks.request(PERSIST_LOCK, { mode: "exclusive" }, operation);
 }
 
 export class BrowserOpfsObjectStore implements LocalObjectStore {
@@ -143,8 +152,9 @@ export class BrowserOpfsObjectStore implements LocalObjectStore {
   async delete(digest: string): Promise<void> {
     try {
       await (await this.directory(digest)).removeEntry(digest);
-    } catch {
-      // already gone
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "NotFoundError") return;
+      throw error;
     }
   }
 }
@@ -166,6 +176,7 @@ export function requestLocalWorker(
       ?? (() => new Worker(new URL("../workers/local-document.worker.ts", import.meta.url), { type: "module" }));
     const worker = createWorker();
     let settled = false;
+    let progressChain = Promise.resolve();
     const finish = (operation: () => void) => {
       if (settled) return;
       settled = true;
@@ -174,30 +185,39 @@ export function requestLocalWorker(
       worker.terminate();
       operation();
     };
-    const abort = () => finish(() => reject(new Error("Local document processing was cancelled.")));
+    const finishAfterProgress = (operation: () => void) => {
+      void progressChain.then(
+        () => finish(operation),
+        (error) => finish(() => reject(error instanceof Error ? error : new Error("Checkpoint write failed."))),
+      );
+    };
+    const abort = () => finishAfterProgress(() => reject(new Error("Local document processing was cancelled.")));
     const timeout = window.setTimeout(() => {
-      finish(() => reject(new Error("Local document processing timed out.")));
+      finishAfterProgress(() => reject(new Error("Local document processing timed out.")));
     }, options.timeoutMs ?? WORKER_TIMEOUT_MS);
     worker.onmessage = (event: MessageEvent<WorkerResult | WorkerFailure | WorkerProgress | unknown>) => {
       const response = event.data;
       if (response === null || typeof response !== "object" || !("kind" in response)) return;
       if ("requestId" in response && typeof response.requestId === "string" && response.requestId !== requestId) return;
       if (isWorkerProgress(response)) {
-        if (response.requestId === requestId) {
-          options.onProgress?.({ completed: response.completed, total: response.total });
-        }
+        const progress = {
+          completed: response.completed,
+          total: response.total,
+          ...(typeof response.text === "string" ? { text: response.text } : {}),
+        };
+        progressChain = progressChain.then(() => options.onProgress?.(progress)).then(() => undefined);
         return;
       }
       if (!isWorkerResponse(response)) {
-        finish(() => reject(new Error("The local document worker returned an invalid response.")));
+        finishAfterProgress(() => reject(new Error("The local document worker returned an invalid response.")));
         return;
       }
       if (response.requestId !== requestId) return;
-      if (response.kind === "error") finish(() => reject(new Error(response.error)));
-      else finish(() => resolve(response));
+      if (response.kind === "error") finishAfterProgress(() => reject(new Error(response.error)));
+      else finishAfterProgress(() => resolve(response));
     };
     worker.onerror = () => {
-      finish(() => reject(new Error("The local document worker stopped unexpectedly.")));
+      finishAfterProgress(() => reject(new Error("The local document worker stopped unexpectedly.")));
     };
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) {
@@ -221,76 +241,93 @@ export function requestLocalWorker(
 
 export async function createBrowserProject(
   file: File,
-  options: Pick<WorkerRequestOptions, "signal" | "onProgress" | "onProcessing" | "onFinalizing" | "createWorker" | "repository" | "storage" | "locks"> = {},
+  options: Pick<WorkerRequestOptions, "signal" | "onProgress" | "onProcessing" | "onFinalizing" | "onCleanupError" | "createWorker" | "repository" | "storage" | "locks"> = {},
 ): Promise<LocalProject> {
   const source = new Uint8Array(await file.arrayBuffer());
   const mimeType = validateLocalSource(source);
   await ensureStorageCapacity(source.length, options.storage);
   const repo = options.repository ?? browserRepository();
-  return withProjectLock("create", async () => {
-    const digest = await sha256(source);
-    const checkpoint = await repo.getCheckpoint(digest);
-    const pages = checkpoint?.pages.slice() ?? [];
-    options.onProcessing?.();
-    let text = typeof checkpoint?.text === "string" && checkpoint.text.trim() ? checkpoint.text : undefined;
-    let pdf: Uint8Array;
-    if (text) {
-      const result = await requestLocalWorker("render", text, options);
-      pdf = result.pdf;
-    } else {
-      const writes: Promise<void>[] = [];
-      const result = await requestLocalWorker("process", source, {
-        ...options,
-        resumeFrom: pages.length + 1,
-        priorPages: pages,
-        onProgress: (progress) => {
-          if (typeof progress.text === "string" && progress.text.trim() !== "") {
+  const digest = await sha256(source);
+  const checkpoint = await repo.getCheckpoint(digest);
+  const pages = checkpoint?.pages.slice() ?? [];
+  options.onProcessing?.();
+  let text = typeof checkpoint?.text === "string" && checkpoint.text.trim() ? checkpoint.text : undefined;
+  let pdf: Uint8Array;
+  if (text) {
+    const result = await requestLocalWorker("render", text, options);
+    pdf = result.pdf;
+  } else {
+    const result = await requestLocalWorker("process", source, {
+      ...options,
+      resumeFrom: pages.length + 1,
+      priorPages: pages,
+      onProgress: async (progress) => {
+        if (typeof progress.text === "string") {
+          if (progress.completed === pages.length + 1) {
             pages.push(progress.text);
-            writes.push(repo.saveCheckpoint({
+            await repo.saveCheckpoint({
               digest,
               filename: file.name,
               mimeType,
               pages: pages.slice(),
               total: progress.total,
+              extractionVersion: EXTRACTION_VERSION,
               updatedAt: new Date().toISOString(),
-            }));
+            });
+          } else if (progress.completed > pages.length + 1) {
+            throw new Error("Out-of-order processing checkpoint");
           }
-          options.onProgress?.(progress);
-        },
-      });
-      await Promise.all(writes);
-      if (typeof result.text !== "string" || result.text.trim() === "") {
-        throw new Error(`The local worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
-      }
-      text = result.text;
-      pdf = result.pdf;
-      await repo.saveCheckpoint({
-        digest,
-        filename: file.name,
-        mimeType,
-        pages: pages.length > 0 ? pages : [text],
-        total: Math.max(pages.length, 1),
-        text,
-        updatedAt: new Date().toISOString(),
-      });
+        }
+        await options.onProgress?.(progress);
+      },
+    });
+    if (typeof result.text !== "string") {
+      throw new Error(`The local worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
     }
+    text = result.text;
+    pdf = result.pdf;
+    await repo.saveCheckpoint({
+      digest,
+      filename: file.name,
+      mimeType,
+      pages: pages.length > 0 ? pages : [text],
+      total: Math.max(pages.length, 1),
+      text,
+      extractionVersion: EXTRACTION_VERSION,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  return withPersistLock(async () => {
     if (options.signal?.aborted) throw new Error("Local document processing was cancelled.");
     options.onFinalizing?.();
     const project = await repo.create({ filename: file.name, mimeType, source, text, exportPdf: pdf });
     await repo.deleteCheckpoint(digest);
-    await repo.sweepOrphans();
+    try {
+      await repo.sweepOrphans();
+    } catch (error) {
+      options.onCleanupError?.(error instanceof Error ? error : new Error("Local cleanup failed."));
+    }
     return project;
   }, options.locks);
 }
 
 export async function updateBrowserProject(projectId: string, expectedRevision: number, text: string): Promise<LocalProject> {
-  return withProjectLock(projectId, async () => {
-    const result = await requestLocalWorker("render", text);
-    return browserRepository().updateText(projectId, expectedRevision, text, result.pdf);
-  });
+  const result = await requestLocalWorker("render", text);
+  return withPersistLock(() => browserRepository().updateText(projectId, expectedRevision, text, result.pdf));
 }
 
-export async function importBrowserArchive(archive: Uint8Array): Promise<LocalProject> {
-  await ensureStorageCapacity(archive.length);
-  return withProjectLock("import", () => browserRepository().importArchive(archive));
+export async function deleteBrowserProject(projectId: string): Promise<void> {
+  await withPersistLock(() => browserRepository().delete(projectId));
+}
+
+export async function importBrowserArchive(archive: Uint8Array | File): Promise<LocalProject> {
+  if (archive instanceof File) {
+    if (archive.size > MAX_ARCHIVE_BYTES) throw new Error("This backup is larger than the local restore limit.");
+    const bytes = new Uint8Array(await archive.arrayBuffer());
+    await ensureStorageCapacity(bytes.byteLength);
+    return withPersistLock(() => browserRepository().importArchive(bytes));
+  }
+  if (archive.byteLength > MAX_ARCHIVE_BYTES) throw new Error("This backup is larger than the local restore limit.");
+  await ensureStorageCapacity(archive.byteLength);
+  return withPersistLock(() => browserRepository().importArchive(archive));
 }

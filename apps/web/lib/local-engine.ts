@@ -1,6 +1,6 @@
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, rgb } from "pdf-lib";
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
+import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/legacy/build/pdf.worker.mjs",
@@ -18,18 +18,53 @@ export function sniffSource(bytes: Uint8Array): LocalSourceType {
     return "image/jpeg";
   }
   const header = new TextDecoder("ascii").decode(bytes.subarray(0, Math.min(bytes.length, 1024)));
-  if (/^\s*%PDF-\d\.\d/.test(header)) {
-    rejectActivePdf(bytes);
-    return "application/pdf";
-  }
+  if (/^\s*%PDF-\d\.\d/.test(header)) return "application/pdf";
   throw new Error("This file is not a supported source. Use a PDF, PNG, or JPEG.");
 }
 
-export function rejectActivePdf(bytes: Uint8Array): void {
-  const sample = new TextDecoder("latin1").decode(bytes.subarray(0, Math.min(bytes.length, 1_048_576)));
-  if (/\/Encrypt\b/.test(sample) || /\/JavaScript\b/.test(sample) || /\/Launch\b/.test(sample) || /\/EmbeddedFiles?\b/.test(sample)) {
-    throw new Error("This PDF uses encryption or active content, which browser-local mode rejects.");
+export const MAX_IMAGE_PIXELS = 40_000_000;
+export const MAX_BROWSER_EXTRACTED_CHARS = 1_000_000;
+
+export function assertImagePixelLimit(bytes: Uint8Array): void {
+  const mime = sniffSource(bytes);
+  const pixels = imagePixelCount(bytes, mime);
+  if (pixels !== undefined && pixels > MAX_IMAGE_PIXELS) {
+    throw new Error("This image is too large to process safely in the browser.");
   }
+}
+
+function imagePixelCount(bytes: Uint8Array, mime: LocalSourceType): number | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (mime === "image/png" && bytes.length >= 24) {
+    return view.getUint32(16) * view.getUint32(20);
+  }
+  if (mime === "image/jpeg") {
+    let offset = 2;
+    while (offset + 8 < bytes.length && bytes[offset] === 0xff) {
+      const marker = bytes[offset + 1];
+      const length = view.getUint16(offset + 2);
+      if (marker >= 0xc0 && marker <= 0xc3 && offset + 8 < bytes.length) {
+        return view.getUint16(offset + 5) * view.getUint16(offset + 7);
+      }
+      offset += 2 + length;
+    }
+  }
+  return undefined;
+}
+
+function unsupportedGlyphs(font: PDFFont, text: string): string[] {
+  const lookup = (font as unknown as { embedder?: { font?: { hasGlyphForCodePoint?: (code: number) => boolean } } }).embedder?.font;
+  if (!lookup?.hasGlyphForCodePoint) {
+    throw new Error("This handwriting font cannot be inspected for supported glyphs.");
+  }
+  const missing: string[] = [];
+  for (const character of text) {
+    if (character === "\n" || character === "\r" || character === "\t" || character === " ") continue;
+    const code = character.codePointAt(0);
+    if (code === undefined) continue;
+    if (!lookup.hasGlyphForCodePoint(code)) missing.push(`U+${code.toString(16).toUpperCase().padStart(4, "0")}`);
+  }
+  return missing;
 }
 
 export interface ExtractedTextPage {
@@ -47,17 +82,39 @@ const FONT_SIZE = 18;
 export const MAX_SOURCE_PAGES = 100;
 export const MAX_BROWSER_OCR_PAGES = 10;
 
+async function rejectParsedPdf(document: PDFDocumentProxy): Promise<void> {
+  const attachments = await document.getAttachments();
+  if (attachments && Object.keys(attachments).length > 0) {
+    throw new Error("This PDF uses encryption or active content, which browser-local mode rejects.");
+  }
+  const actions = await document.getJSActions();
+  if (actions && Object.keys(actions).length > 0) {
+    throw new Error("This PDF uses encryption or active content, which browser-local mode rejects.");
+  }
+}
+
 export async function extractTextPages(
   source: Uint8Array,
   onPage?: (pageNumber: number, totalPages: number, text: string) => void,
   startPage = 1,
   allowEmpty = false,
 ): Promise<ExtractedTextPage[]> {
-  const document = await getDocument({
-    data: source.slice(),
-    isEvalSupported: false,
-    useWorkerFetch: false,
-  }).promise;
+  let document;
+  try {
+    document = await getDocument({
+      data: source.slice(),
+      isEvalSupported: false,
+      useWorkerFetch: false,
+      stopAtErrors: true,
+    }).promise;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/password/i.test(message)) {
+      throw new Error("This PDF uses encryption or active content, which browser-local mode rejects.");
+    }
+    throw error instanceof Error ? error : new Error("The PDF could not be parsed safely.");
+  }
+  await rejectParsedPdf(document);
   if (document.numPages > MAX_SOURCE_PAGES) {
     throw new Error(`PDFs with more than ${MAX_SOURCE_PAGES} pages are not supported.`);
   }
@@ -67,6 +124,10 @@ export async function extractTextPages(
   const pages: ExtractedTextPage[] = [];
   for (let pageNumber = startPage; pageNumber <= document.numPages; pageNumber += 1) {
     const sourcePage = await document.getPage(pageNumber);
+    const pageActions = await sourcePage.getJSActions();
+    if (pageActions && Object.keys(pageActions).length > 0) {
+      throw new Error("This PDF uses encryption or active content, which browser-local mode rejects.");
+    }
     const content = await sourcePage.getTextContent();
     const pageWidth = sourcePage.getViewport({ scale: 1 }).width;
     const items = content.items
@@ -99,6 +160,10 @@ export async function extractTextPages(
     pages.push({ pageNumber, text });
     onPage?.(pageNumber, document.numPages, text);
   }
+  const totalChars = pages.reduce((sum, page) => sum + page.text.length, 0);
+  if (totalChars > MAX_BROWSER_EXTRACTED_CHARS) {
+    throw new Error("This document has more extracted text than browser-local mode accepts.");
+  }
   return pages;
 }
 
@@ -106,6 +171,10 @@ export async function renderA4Pdf(text: string, fontBytes: Uint8Array): Promise<
   const document = await PDFDocument.create();
   document.registerFontkit(fontkit);
   const font = await document.embedFont(new Uint8Array(fontBytes), { subset: true });
+  const missing = unsupportedGlyphs(font, text);
+  if (missing.length > 0) {
+    throw new Error(`This handwriting font cannot render ${missing[0]}.`);
+  }
   const maxWidth = A4_WIDTH - HORIZONTAL_MARGIN * 2;
   const linesPerPage = Math.floor((FIRST_BASELINE - BOTTOM_MARGIN) / LINE_HEIGHT) + 1;
   const lines: string[] = [];
@@ -177,6 +246,9 @@ export async function rasterizePdfPage(source: Uint8Array, pageNumber: number): 
   }
   const page = await document.getPage(pageNumber);
   const viewport = page.getViewport({ scale: 2 });
+  if (Math.ceil(viewport.width) * Math.ceil(viewport.height) > MAX_IMAGE_PIXELS) {
+    throw new Error("This scanned page is too large to rasterize safely.");
+  }
   const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
   const context = canvas.getContext("2d");
   if (!context) throw new Error("This browser cannot rasterize scanned PDFs.");

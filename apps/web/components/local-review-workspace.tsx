@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { browserRepository, updateBrowserProject } from "@/lib/browser-local";
-import type { LocalProject } from "@/lib/local-store";
+import { browserRepository, deleteBrowserProject, updateBrowserProject } from "@/lib/browser-local";
+import { forgetProject } from "@/lib/recent-projects";
+import { backupDownloadName, reviewedPdfDownloadName, type LocalProject } from "@/lib/local-store";
 
 function download(bytes: Uint8Array, filename: string, type: string) {
   const url = URL.createObjectURL(new Blob([bytes.slice()], { type }));
@@ -16,6 +18,7 @@ function download(bytes: Uint8Array, filename: string, type: string) {
 }
 
 export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
+  const router = useRouter();
   const [project, setProject] = useState<LocalProject>();
   const [draft, setDraft] = useState("");
   const [sourcePreview, setSourcePreview] = useState<string>();
@@ -42,6 +45,8 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
     };
   }, [projectId]);
 
+  const dirty = Boolean(project && draft !== project.text);
+
   async function save() {
     if (!project) return;
     setBusy(true);
@@ -57,12 +62,27 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
 
   async function downloadPdf() {
     if (!project) return;
-    download(await browserRepository().readExport(project.id), `${project.filename.replace(/\.pdf$/i, "")}-reviewed.pdf`, "application/pdf");
+    download(await browserRepository().readExport(project.id), reviewedPdfDownloadName(project.filename), "application/pdf");
   }
 
   async function exportArchive() {
     if (!project) return;
-    download(await browserRepository().exportArchive(project.id), `${project.filename.replace(/\.pdf$/i, "")}.homeworker`, "application/vnd.homeworker.project+json");
+    download(await browserRepository().exportArchive(project.id), backupDownloadName(project.filename), "application/vnd.homeworker.project+json");
+  }
+
+  async function removeProject() {
+    if (!project) return;
+    if (!window.confirm(`Delete “${project.filename}” from this browser? This cannot be undone.`)) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await deleteBrowserProject(project.id);
+      forgetProject(project.id);
+      router.push("/");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The local project could not be deleted.");
+      setBusy(false);
+    }
   }
 
   if (error && !project) return <main className="centered-state"><h1>Local project unavailable</h1><p>{error}</p><Link href="/">Return home</Link></main>;
@@ -74,7 +94,7 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
         <div className="toolbar-left">
           <div className="project-title-group">
             <strong>{project.filename}</strong>
-            <span>Revision {project.revision} · private to this browser</span>
+            <span>Revision {project.revision} · limited browser preview</span>
           </div>
         </div>
         <Link className="button button-ghost" href="/">Home</Link>
@@ -83,6 +103,7 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
         <article className="review-panel">
           <span className="eyebrow">Source beside extracted text</span>
           <h2>Review before export</h2>
+          <p className="preview-help">This browser preview is whole-document text only. It is not the per-block OCR review used by the local service or hosted beta, and the download is not a fully verified export.</p>
           {sourcePreview ? (
             project.mimeType === "application/pdf"
               ? <object aria-label="Source document" className="source-preview" data={sourcePreview} type="application/pdf" />
@@ -103,9 +124,10 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
           <div aria-label="Handwritten A4 preview" className="notebook-preview">
             <p>{draft || "Your reviewed text will appear here."}</p>
           </div>
-          <p className="preview-help">This preview follows the handwriting, spacing, and ruled-paper style of the export. Save a revision to regenerate the downloadable PDF.</p>
-          <button className="button button-primary button-wide" onClick={() => void downloadPdf()} type="button">Download A4 PDF</button>
-          <button className="button button-secondary button-wide" onClick={() => void exportArchive()} type="button">Export .homeworker backup</button>
+          <p className="preview-help">This preview is not the print PDF. Save a revision to regenerate the downloadable file from the saved text.</p>
+          <button className="button button-primary button-wide" disabled={dirty} onClick={() => void downloadPdf()} type="button">Download A4 PDF</button>
+          <button className="button button-secondary button-wide" disabled={dirty} onClick={() => void exportArchive()} type="button">Export .homeworker backup</button>
+          <button className="button button-ghost button-wide" disabled={busy} onClick={() => void removeProject()} type="button">Delete project</button>
         </aside>
       </section>
     </main>

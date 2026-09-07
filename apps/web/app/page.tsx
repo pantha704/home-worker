@@ -24,7 +24,7 @@ export default function HomePage() {
           <p className="hero-lead">
             {preview
               ? "Privately process text-layer PDFs, PNG, JPEG, and scanned PDFs (up to 10 OCR pages) in this browser. OCR is uncertain evidence—review the source beside the text before you print."
-              : "Read PDFs and handwriting, review every uncertain detail, then lay it out in a fresh, licensed handwriting style—ready for A4 printing."}
+              : "Read PDFs and handwriting, review every uncertain OCR result as evidence, then lay it out in a fresh, licensed handwriting style—ready for A4 printing."}
           </p>
           <ul className="hero-checks" aria-label="Homeworker benefits">
             <li><CheckIcon /> No silent rewriting</li>
