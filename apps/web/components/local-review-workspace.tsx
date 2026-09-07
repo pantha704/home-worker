@@ -84,7 +84,7 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
       <section className="review-layout">
         <article className="review-panel">
           <span className="eyebrow">Source beside extracted text</span>
-          <h2>Review extracted text</h2>
+          <h2>Review before export</h2>
           <p className="preview-help">This browser preview is whole-document text only. It is not the per-block OCR review used by the local service or hosted beta, and the download is not a fully verified export.</p>
           {sourcePreview ? (
             project.mimeType === "application/pdf"
