@@ -1,6 +1,6 @@
 import { createWorker } from "tesseract.js";
 
-import { sniffSource } from "@/lib/local-engine";
+import { assertImagePixelLimit, sniffSource } from "@/lib/local-engine";
 import { MAX_UPLOAD_BYTES } from "@/lib/validation";
 
 export interface OcrAssets {
@@ -22,6 +22,7 @@ export async function extractImageText(bytes: Uint8Array, assets: OcrAssets): Pr
   if (bytes.byteLength > MAX_UPLOAD_BYTES) {
     throw new Error("This image is larger than the 25 MB local limit.");
   }
+  assertImagePixelLimit(bytes);
   const mime = sniffSource(bytes);
   if (mime !== "image/png" && mime !== "image/jpeg") {
     throw new Error("Browser OCR currently supports PNG and JPEG images.");

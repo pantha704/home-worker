@@ -22,8 +22,8 @@ Do not count existing capabilities as new work.
 | A3 Archive size/type/hash/policy | Digest check + mime allowlist; read whole File first | Size gate before read; sniff source; decoded size; backup filename stem | archive tests | VERIFIED |
 | B1 Review semantics | Hosted explicit block review; confirm ignores acknowledgement lists | Save all page drafts before confirm; browser preview labelled unverified; dirty downloads blocked | review-workspace + local-review tests | VERIFIED (unit). Visual/a11y not re-run |
 | B2 Rendering fidelity | Server fallback glyphs + overflow tests; browser overflow tests | Browser renderer fails closed on missing glyphs | local-engine ₹ test; existing API glyph tests | VERIFIED (unit). Full persona visual inspection **not run** |
-| C1 PDF structure policy | 1 MiB keyword scan | Parsed-structure inspection | Phase C | NOT STARTED |
-| C2 Resource bounds | Upload/page caps in browser and API | Isolated parse process on real host | Phase C | NOT STARTED |
+| C1 PDF structure policy | 1 MiB keyword scan | Parsed-structure inspection | extractTextPages JS action + ingestion launch/embed tests | VERIFIED (unit). Escaped-name/incremental-update corpus not exhaustive |
+| C2 Resource bounds | Upload/page caps; Compose isolation | Browser pixel/text caps; isolated parse process on Render | PNG dimension test; existing API page/upload tests | VERIFIED for in-process limits. Isolated parse process on Render **BLOCKED** |
 | D Hosted quotas/leases | Code + unit tests | Real PostgreSQL concurrency | BLOCKED without hosted DB | NOT STARTED |
 | E Auth/privacy/ops | Code + unit tests | Two live accounts, backups | BLOCKED without vendor access | NOT STARTED |
 | F Scope/UX/Safari | Chrome+Firefox e2e | Safari/iOS, listing/deletion UX, OCR benchmark | Safari BLOCKED on Linux | NOT STARTED |
