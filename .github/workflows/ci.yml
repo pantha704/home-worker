@@ -26,6 +26,22 @@ jobs:
     defaults:
       run:
         working-directory: services/api
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: homeworker
+          POSTGRES_PASSWORD: homeworker
+          POSTGRES_DB: homeworker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U homeworker -d homeworker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      INK_TEST_DATABASE_URL: postgresql+psycopg://homeworker:homeworker@localhost:5432/homeworker
     steps:
       - name: Check out source
         uses: actions/checkout@v7.0.0

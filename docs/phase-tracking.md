@@ -24,7 +24,7 @@ Do not count existing capabilities as new work.
 | B2 Rendering fidelity | Server fallback glyphs + overflow tests; browser overflow tests | Browser renderer fails closed on missing glyphs | local-engine ₹ test; existing API glyph tests | VERIFIED (unit). Full persona visual inspection **not run** |
 | C1 PDF structure policy | 1 MiB keyword scan | Parsed-structure inspection | extractTextPages JS action + ingestion launch/embed tests | VERIFIED (unit). Escaped-name/incremental-update corpus not exhaustive |
 | C2 Resource bounds | Upload/page caps; Compose isolation | Browser pixel/text caps; isolated parse process on Render | PNG dimension test; existing API page/upload tests | VERIFIED for in-process limits. Isolated parse process on Render **BLOCKED** |
-| D Hosted quotas/leases | Code + unit tests | Real PostgreSQL concurrency | BLOCKED without hosted DB | NOT STARTED |
+| D Hosted quotas/leases | SQLite unit tests | Real PostgreSQL concurrency | `test_postgres_concurrency.py` on Postgres 17 | VERIFIED locally. CI postgres service added. Live Supabase/Render still BLOCKED |
 | E Auth/privacy/ops | Code + unit tests | Two live accounts, backups | BLOCKED without vendor access | NOT STARTED |
 | F Scope/UX/Safari | Chrome+Firefox e2e | Safari/iOS, listing/deletion UX, OCR benchmark | Safari BLOCKED on Linux | NOT STARTED |
 | G Release/live beta | CI on GitHub | Owner branch protection, live drills, invite budget | BLOCKED pending owner | NOT STARTED |
