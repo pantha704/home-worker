@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { extractTextPages, ocrEmptyPdfPages, rasterizePdfPage, renderA4Pdf, sniffSource } from "@/lib/local-engine";
+import { extractTextPages, MAX_BROWSER_OCR_PAGES, rasterizePdfPage, renderA4Pdf, sniffSource } from "@/lib/local-engine";
 import { browserOcrAssets, extractImageText } from "@/lib/local-ocr";
 
 let handwritingFont: Promise<Uint8Array> | undefined;
@@ -35,20 +35,25 @@ async function extractSource(request: Extract<Request, { action: "process" }>): 
     return text;
   }
   const pages = await extractTextPages(request.source, undefined, request.resumeFrom ?? 1, true);
-  const filled = await ocrEmptyPdfPages(pages, async (pageNumber) => (
-    extractImageText(await rasterizePdfPage(request.source, pageNumber), assets)
-  ));
-  const total = prior.length + filled.length;
-  const texts = filled.map((page) => page.text);
-  texts.forEach((text, index) => {
+  if (pages.filter((page) => page.text.trim() === "").length > MAX_BROWSER_OCR_PAGES) {
+    throw new Error(`Browser OCR supports at most ${MAX_BROWSER_OCR_PAGES} scanned pages. Use the full local application for longer scans.`);
+  }
+  const total = pages.at(-1)?.pageNumber ?? prior.length;
+  const texts: string[] = [];
+  for (const page of pages) {
+    let text = page.text;
+    if (!text.trim()) {
+      text = await extractImageText(await rasterizePdfPage(request.source, page.pageNumber), assets);
+    }
+    texts.push(text);
     self.postMessage({
       kind: "progress",
       requestId: request.requestId,
-      completed: prior.length + index + 1,
+      completed: page.pageNumber,
       total,
       text,
     });
-  });
+  }
   return [...prior, ...texts].join("\n\n");
 }
 

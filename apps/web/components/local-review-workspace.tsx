@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { browserRepository, updateBrowserProject } from "@/lib/browser-local";
-import type { LocalProject } from "@/lib/local-store";
+import { backupDownloadName, reviewedPdfDownloadName, type LocalProject } from "@/lib/local-store";
 
 function download(bytes: Uint8Array, filename: string, type: string) {
   const url = URL.createObjectURL(new Blob([bytes.slice()], { type }));
@@ -57,12 +57,12 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
 
   async function downloadPdf() {
     if (!project) return;
-    download(await browserRepository().readExport(project.id), `${project.filename.replace(/\.pdf$/i, "")}-reviewed.pdf`, "application/pdf");
+    download(await browserRepository().readExport(project.id), reviewedPdfDownloadName(project.filename), "application/pdf");
   }
 
   async function exportArchive() {
     if (!project) return;
-    download(await browserRepository().exportArchive(project.id), `${project.filename.replace(/\.pdf$/i, "")}.homeworker`, "application/vnd.homeworker.project+json");
+    download(await browserRepository().exportArchive(project.id), backupDownloadName(project.filename), "application/vnd.homeworker.project+json");
   }
 
   if (error && !project) return <main className="centered-state"><h1>Local project unavailable</h1><p>{error}</p><Link href="/">Return home</Link></main>;

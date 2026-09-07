@@ -126,10 +126,12 @@ describe("browser-local safety gates", () => {
       requestId: "current",
       onProgress,
     });
-    worker.onmessage?.({ data: { kind: "progress", requestId: "stale", completed: 1, total: 2 } } as MessageEvent);
-    worker.onmessage?.({ data: { kind: "progress", requestId: "current", completed: 1, total: 2 } } as MessageEvent);
+    worker.onmessage?.({ data: { kind: "progress", requestId: "stale", completed: 1, total: 2, text: "STALE" } } as MessageEvent);
+    worker.onmessage?.({ data: { kind: "progress", requestId: "current", completed: 1, total: 2, text: "PAGE_ONE" } } as MessageEvent);
+    await Promise.resolve();
+    await Promise.resolve();
     expect(onProgress).toHaveBeenCalledOnce();
-    expect(onProgress).toHaveBeenCalledWith({ completed: 1, total: 2 });
+    expect(onProgress).toHaveBeenCalledWith({ completed: 1, total: 2, text: "PAGE_ONE" });
     const rejection = expect(pending).rejects.toThrow("timed out");
     await vi.advanceTimersByTimeAsync(50);
     await rejection;
@@ -199,6 +201,8 @@ class MemoryObjects implements LocalObjectStore {
     if (!value) throw new Error("missing object");
     return value.slice();
   }
+  async list() { return [...this.values.keys()]; }
+  async delete(digest: string) { this.values.delete(digest); }
 }
 
 describe("browser-local checkpoints", () => {
@@ -245,5 +249,117 @@ describe("browser-local checkpoints", () => {
     });
     expect(resumed.text).toBe("HOMEWORKER");
     expect(await repo.getCheckpoint(digest)).toBeUndefined();
+  });
+
+  it("persists blank and native pages from worker progress then resumes without skipping", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    const source = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const file = new File([source], "notes.png", { type: "image/png" });
+    const controller = new AbortController();
+    const worker = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onerror: null,
+      postMessage(data: { requestId: string; resumeFrom?: number; priorPages?: string[] }) {
+        const id = data.requestId;
+        if (data.priorPages?.length === 2) {
+          worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 3, total: 5, text: "P3" } } as MessageEvent);
+          worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 4, total: 5, text: "P4" } } as MessageEvent);
+          worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 5, total: 5, text: "P5" } } as MessageEvent);
+          worker.onmessage?.({ data: { kind: "result", requestId: id, text: "P1\n\n\n\nP3\n\nP4\n\nP5", pdf: new Uint8Array([1]) } } as MessageEvent);
+          return;
+        }
+        worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 1, total: 5, text: "P1" } } as MessageEvent);
+        worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 2, total: 5, text: "" } } as MessageEvent);
+        controller.abort();
+      },
+      terminate: vi.fn(),
+    };
+
+    await expect(createBrowserProject(file, {
+      signal: controller.signal,
+      createWorker: () => worker as unknown as Worker,
+      repository: repo,
+      storage,
+      locks,
+    })).rejects.toThrow("cancelled");
+
+    const digest = await sha256(source);
+    expect(await repo.getCheckpoint(digest)).toMatchObject({ pages: ["P1", ""], total: 5 });
+
+    const resumed = await createBrowserProject(file, {
+      createWorker: () => worker as unknown as Worker,
+      repository: repo,
+      storage,
+      locks,
+    });
+    expect(resumed.text).toBe("P1\n\n\n\nP3\n\nP4\n\nP5");
+    expect(await repo.getCheckpoint(digest)).toBeUndefined();
+  });
+
+  it("waits for checkpoint writes before resolving a worker result", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const onProgress = vi.fn(() => gate);
+    const worker = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onerror: null,
+      postMessage(data: { requestId: string }) {
+        worker.onmessage?.({ data: { kind: "progress", requestId: data.requestId, completed: 1, total: 1, text: "P1" } } as MessageEvent);
+        worker.onmessage?.({ data: { kind: "result", requestId: data.requestId, pdf: new Uint8Array([1]) } } as MessageEvent);
+      },
+      terminate: vi.fn(),
+    };
+    let resolved = false;
+    const pending = requestLocalWorker("render", "text", {
+      createWorker: () => worker as unknown as Worker,
+      onProgress,
+    }).then((result) => {
+      resolved = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(onProgress).toHaveBeenCalledWith({ completed: 1, total: 1, text: "P1" });
+    expect(resolved).toBe(false);
+    release?.();
+    await pending;
+    expect(resolved).toBe(true);
+  });
+
+  it("uses one persist lock for create and does not fail create when cleanup throws", async () => {
+    const names: string[] = [];
+    const locks = {
+      request: (name: string, _opts: unknown, operation: () => Promise<unknown>) => {
+        names.push(name);
+        return operation();
+      },
+    } as unknown as LockManager;
+    const objects = new MemoryObjects();
+    objects.delete = async () => {
+      throw new Error("quota exceeded");
+    };
+    await objects.put("deadbeef", new TextEncoder().encode("orphan"));
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
+    const source = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const worker = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onerror: null,
+      postMessage(data: { requestId: string }) {
+        worker.onmessage?.({ data: { kind: "result", requestId: data.requestId, text: "HOMEWORKER", pdf: new Uint8Array([1]) } } as MessageEvent);
+      },
+      terminate: vi.fn(),
+    };
+    const cleanup = vi.fn();
+    const project = await createBrowserProject(new File([source], "notes.png", { type: "image/png" }), {
+      createWorker: () => worker as unknown as Worker,
+      repository: repo,
+      storage,
+      locks,
+      onCleanupError: cleanup,
+    });
+    expect(project.text).toBe("HOMEWORKER");
+    expect(names).toEqual(["homeworker:persist"]);
+    expect(cleanup).toHaveBeenCalled();
   });
 });
