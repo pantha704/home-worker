@@ -47,11 +47,13 @@ def test_launch_action_pdfs_are_rejected(tmp_path: Path) -> None:
     document = fitz.open()
     page = document.new_page()
     page.insert_text((72, 720), "Launch target")
-    page.insert_link({
-        "kind": fitz.LINK_LAUNCH,
-        "from": fitz.Rect(50, 50, 120, 80),
-        "file": "calc.exe",
-    })
+    page.insert_link(
+        {
+            "kind": fitz.LINK_LAUNCH,
+            "from": fitz.Rect(50, 50, 120, 80),
+            "file": "calc.exe",
+        }
+    )
     path = _write(tmp_path, document.tobytes())
     document.close()
     with pytest.raises(InkError) as raised:

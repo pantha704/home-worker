@@ -20,16 +20,18 @@ from .errors import InkError
 ALLOWED_MIME_TYPES = frozenset({"application/pdf", "image/png", "image/jpeg"})
 EXTENSIONS = {"application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg"}
 CHUNK_SIZE = 1024 * 1024
-ACTIVE_ACTION_TYPES = frozenset({
-    "/JavaScript",
-    "/JS",
-    "/Launch",
-    "/SubmitForm",
-    "/ImportData",
-    "/GoToR",
-    "/RichMedia",
-    "/EmbeddedFile",
-})
+ACTIVE_ACTION_TYPES = frozenset(
+    {
+        "/JavaScript",
+        "/JS",
+        "/Launch",
+        "/SubmitForm",
+        "/ImportData",
+        "/GoToR",
+        "/RichMedia",
+        "/EmbeddedFile",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
