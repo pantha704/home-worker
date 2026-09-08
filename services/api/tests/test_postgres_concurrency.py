@@ -5,6 +5,7 @@ import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,10 +26,12 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def pg_settings(tmp_path) -> Iterator[Settings]:
+    schema = f"hwtest{uuid4().hex[:10]}"
     settings = Settings(
         app_env="test",
         allow_test_backends=True,
         database_url=POSTGRES_URL,
+        database_schema=schema,
         storage_root=tmp_path / "storage",
         work_root=tmp_path / "work",
         cors_origins=("http://testserver",),
@@ -39,7 +42,7 @@ def pg_settings(tmp_path) -> Iterator[Settings]:
     yield settings
     engine = create_engine(POSTGRES_URL)
     with engine.begin() as connection:
-        connection.execute(text("DROP SCHEMA IF EXISTS homeworker CASCADE"))
+        connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
     engine.dispose()
 
 

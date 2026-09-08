@@ -105,3 +105,40 @@ test("keeps review and handwriting preview usable on a narrow phone", async ({ p
   expect(await preview.evaluate((element) => getComputedStyle(element.querySelector("p")!).fontFamily)).toContain("Ink Scholar");
   expect(await page.getByRole("link", { name: "Home" }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThan(0);
 });
+
+test("cancel during processing then recover by uploading again", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto("/");
+  await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
+  await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
+  const cancel = page.getByRole("button", { name: /cancel processing/i });
+  if (await cancel.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await cancel.click();
+    await expect(page.getByText(/processing cancelled/i)).toBeVisible();
+  }
+  await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
+  await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
+  await expect(page).toHaveURL(/\/project\?id=local_/, { timeout: 90_000 });
+  await expect(page.getByRole("textbox", { name: /review extracted text/i })).toContainText(/homeworker/i);
+});
+
+test("two tabs cannot overwrite each other's revision", async ({ page, context }) => {
+  test.setTimeout(180_000);
+  await page.goto("/");
+  await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
+  await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
+  await expect(page).toHaveURL(/\/project\?id=local_/, { timeout: 90_000 });
+  const projectUrl = page.url();
+  const other = await context.newPage();
+  await other.goto(projectUrl);
+  const editor = page.getByRole("textbox", { name: /review extracted text/i });
+  const otherEditor = other.getByRole("textbox", { name: /review extracted text/i });
+  await expect(editor).toBeVisible();
+  await expect(otherEditor).toBeVisible();
+  await editor.fill("First tab wording");
+  await page.getByRole("button", { name: /save revision/i }).click();
+  await expect(page.getByText(/revision 2/i)).toBeVisible();
+  await otherEditor.fill("Second tab wording");
+  await other.getByRole("button", { name: /save revision/i }).click();
+  await expect(other.getByRole("alert")).toContainText(/another tab|could not be saved/i);
+});

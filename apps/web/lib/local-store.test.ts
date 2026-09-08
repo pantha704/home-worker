@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -33,6 +34,12 @@ function bytes(value: string) {
   return new TextEncoder().encode(value);
 }
 
+async function textPdf(text: string): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  pdf.addPage().drawText(text, { x: 72, y: 720, size: 12 });
+  return new Uint8Array(await pdf.save());
+}
+
 describe("local project repository", () => {
   it("commits immutable source and revision objects then reopens them", async () => {
     const objects = new MemoryObjects();
@@ -61,7 +68,7 @@ describe("local project repository", () => {
   it("exports and imports a digest-verified portable archive", async () => {
     const objects = new MemoryObjects();
     const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
-    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: bytes("%PDF-1.7\n"), text: "reviewed", exportPdf: bytes("rendered") });
+    const project = await repo.create({ filename: "a.pdf", mimeType: "application/pdf", source: await textPdf("reviewed"), text: "reviewed", exportPdf: bytes("rendered") });
     const archive = await repo.exportArchive(project.id);
     const importedRepo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
     const imported = await importedRepo.importArchive(archive);
@@ -178,6 +185,25 @@ describe("local project repository", () => {
     expect(objects.values.size).toBe(3);
   });
 
+  it("reads text and export bytes from the same requested revision", async () => {
+    const objects = new MemoryObjects();
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
+    const project = await repo.create({
+      filename: "a.pdf",
+      mimeType: "application/pdf",
+      source: bytes("%PDF-1.7\n"),
+      text: "one",
+      exportPdf: bytes("p1"),
+    });
+    await repo.updateText(project.id, 1, "two", bytes("p2"));
+    const first = await repo.snapshot(project.id, 1);
+    const second = await repo.snapshot(project.id, 2);
+    expect(first.project).toMatchObject({ revision: 1, text: "one" });
+    expect(first.exportPdf).toEqual(bytes("p1"));
+    expect(second.project).toMatchObject({ revision: 2, text: "two" });
+    expect(second.exportPdf).toEqual(bytes("p2"));
+  });
+
   it("discards expired or incompatible checkpoints", async () => {
     const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
     await repo.saveCheckpoint({
@@ -212,6 +238,25 @@ describe("local project repository", () => {
     };
     archive.project.mimeType = "application/pdf";
     await expect(repo.importArchive(new TextEncoder().encode(JSON.stringify(archive)))).rejects.toThrow("does not match");
+  });
+
+  it("rejects archives whose PDF fails parsed-structure inspection", async () => {
+    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
+    const project = await repo.create({
+      filename: "a.pdf",
+      mimeType: "application/pdf",
+      source: await textPdf("reviewed"),
+      text: "reviewed",
+      exportPdf: bytes("rendered"),
+    });
+    const archive = await repo.exportArchive(project.id);
+    await expect(
+      repo.importArchive(archive, {
+        inspectPdf: async () => {
+          throw new Error("This PDF uses encryption or active content, which browser-local mode rejects.");
+        },
+      }),
+    ).rejects.toThrow("encryption or active content");
   });
 
   it("rejects oversized archives before parsing JSON", async () => {
