@@ -145,15 +145,7 @@ export class LocalProjectRepository {
   }
 
   async get(id: string): Promise<LocalProject> {
-    const database = await this.database();
-    const transaction = database.transaction(["projects", "revisions"], "readonly");
-    const project = await request(transaction.objectStore("projects").get(id)) as ProjectRow | undefined;
-    if (!project) throw new Error("Local project not found");
-    const revision = await request(transaction.objectStore("revisions").get(`${id}:${project.currentRevision}`)) as RevisionRow | undefined;
-    if (!revision) throw new Error("Local project revision is missing");
-    await complete(transaction);
-    database.close();
-    return this.view(project, revision);
+    return (await this.snapshot(id)).project;
   }
 
   async readSource(id: string): Promise<Uint8Array> {
@@ -166,15 +158,24 @@ export class LocalProjectRepository {
     return this.objects.get(project.sourceDigest);
   }
 
-  async readExport(id: string): Promise<Uint8Array> {
+  async readExport(id: string, revision?: number): Promise<Uint8Array> {
+    return (await this.snapshot(id, revision)).exportPdf;
+  }
+
+  async snapshot(id: string, revision?: number): Promise<{ project: LocalProject; exportPdf: Uint8Array }> {
     const database = await this.database();
     const transaction = database.transaction(["projects", "revisions"], "readonly");
     const project = await request(transaction.objectStore("projects").get(id)) as ProjectRow | undefined;
     if (!project) throw new Error("Local project not found");
-    const revision = await request(transaction.objectStore("revisions").get(`${id}:${project.currentRevision}`)) as RevisionRow;
+    const revisionNumber = revision ?? project.currentRevision;
+    const revisionRow = await request(transaction.objectStore("revisions").get(`${id}:${revisionNumber}`)) as RevisionRow | undefined;
+    if (!revisionRow) throw new Error("Local project revision is missing");
     await complete(transaction);
     database.close();
-    return this.objects.get(revision.exportDigest);
+    return {
+      project: this.view(project, revisionRow),
+      exportPdf: await this.objects.get(revisionRow.exportDigest),
+    };
   }
 
   async updateText(id: string, expectedRevision: number, text: string, exportPdf: Uint8Array): Promise<LocalProject> {
@@ -212,21 +213,24 @@ export class LocalProjectRepository {
   }
 
   async exportArchive(id: string): Promise<Uint8Array> {
-    const project = await this.get(id);
-    const [source, rendered] = await Promise.all([this.readSource(id), this.readExport(id)]);
+    const snapshot = await this.snapshot(id);
+    const source = await this.readSource(id);
     const archive = {
       format: "homeworker-project",
       version: 1,
-      project: { filename: project.filename, mimeType: project.mimeType, text: project.text },
+      project: { filename: snapshot.project.filename, mimeType: snapshot.project.mimeType, text: snapshot.project.text },
       objects: {
         source: { digest: await sha256(source), data: encode(source) },
-        rendered: { digest: await sha256(rendered), data: encode(rendered) },
+        rendered: { digest: await sha256(snapshot.exportPdf), data: encode(snapshot.exportPdf) },
       },
     };
     return new TextEncoder().encode(JSON.stringify(archive));
   }
 
-  async importArchive(bytes: Uint8Array): Promise<LocalProject> {
+  async importArchive(
+    bytes: Uint8Array,
+    options: { inspectPdf?: (source: Uint8Array) => Promise<void> } = {},
+  ): Promise<LocalProject> {
     if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
       throw new Error("This backup is larger than the local restore limit.");
     }
@@ -267,6 +271,9 @@ export class LocalProjectRepository {
     const actualType = sniffSource(source);
     if (actualType !== mimeType) {
       throw new Error("Homeworker archive source type does not match its contents.");
+    }
+    if (mimeType === "application/pdf") {
+      await options.inspectPdf?.(source);
     }
     return this.create({ filename: project.filename, mimeType, source, text: project.text, exportPdf: rendered });
   }

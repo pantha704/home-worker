@@ -1,5 +1,5 @@
 import { EXTRACTION_VERSION, LocalProjectRepository, sha256, type LocalObjectStore, type LocalProject } from "@/lib/local-store";
-import { sniffSource } from "@/lib/local-engine";
+import { extractTextPages, sniffSource } from "@/lib/local-engine";
 import { MAX_ARCHIVE_BYTES, MAX_UPLOAD_BYTES } from "@/lib/validation";
 
 interface StorageGate {
@@ -22,6 +22,7 @@ interface WorkerRequestOptions {
   createWorker?: () => Worker;
   requestId?: string;
   signal?: AbortSignal;
+  checkpointAbortMs?: number;
   onProgress?: (progress: { completed: number; total: number; text?: string }) => void | Promise<void>;
   onProcessing?: () => void;
   onFinalizing?: () => void;
@@ -55,6 +56,7 @@ const DB_NAME = "homeworker-local-v1";
 const RESERVE_BYTES = 10 * 1024 * 1024;
 const WORKER_TIMEOUT_MS = 120_000;
 export const PERSIST_LOCK = "homeworker:persist";
+export const CHECKPOINT_ABORT_MS = 2_000;
 
 export function validateLocalPdfSource(source: Uint8Array): void {
   if (source.length > MAX_UPLOAD_BYTES) throw new Error("This PDF is larger than the 25 MB local limit.");
@@ -191,7 +193,16 @@ export function requestLocalWorker(
         (error) => finish(() => reject(error instanceof Error ? error : new Error("Checkpoint write failed."))),
       );
     };
-    const abort = () => finishAfterProgress(() => reject(new Error("Local document processing was cancelled.")));
+    const abort = () => {
+      worker.terminate();
+      const capMs = options.checkpointAbortMs ?? CHECKPOINT_ABORT_MS;
+      const cap = new Promise<void>((resolve) => {
+        window.setTimeout(resolve, capMs);
+      });
+      void Promise.race([progressChain.then(() => undefined, () => undefined), cap]).then(() => {
+        finish(() => reject(new Error("Local document processing was cancelled.")));
+      });
+    };
     const timeout = window.setTimeout(() => {
       finishAfterProgress(() => reject(new Error("Local document processing timed out.")));
     }, options.timeoutMs ?? WORKER_TIMEOUT_MS);
@@ -325,9 +336,9 @@ export async function importBrowserArchive(archive: Uint8Array | File): Promise<
     if (archive.size > MAX_ARCHIVE_BYTES) throw new Error("This backup is larger than the local restore limit.");
     const bytes = new Uint8Array(await archive.arrayBuffer());
     await ensureStorageCapacity(bytes.byteLength);
-    return withPersistLock(() => browserRepository().importArchive(bytes));
+    return withPersistLock(() => browserRepository().importArchive(bytes, { inspectPdf: async (source) => { await extractTextPages(source); } }));
   }
   if (archive.byteLength > MAX_ARCHIVE_BYTES) throw new Error("This backup is larger than the local restore limit.");
   await ensureStorageCapacity(archive.byteLength);
-  return withPersistLock(() => browserRepository().importArchive(archive));
+  return withPersistLock(() => browserRepository().importArchive(archive, { inspectPdf: async (source) => { await extractTextPages(source); } }));
 }

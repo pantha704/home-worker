@@ -62,7 +62,7 @@ export function LocalReviewWorkspace({ projectId }: { projectId: string }) {
 
   async function downloadPdf() {
     if (!project) return;
-    download(await browserRepository().readExport(project.id), reviewedPdfDownloadName(project.filename), "application/pdf");
+    download(await browserRepository().readExport(project.id, project.revision), reviewedPdfDownloadName(project.filename), "application/pdf");
   }
 
   async function exportArchive() {

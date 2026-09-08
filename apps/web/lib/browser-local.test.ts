@@ -189,7 +189,31 @@ describe("browser-local safety gates", () => {
     const pending = requestLocalWorker("render", "text", { createWorker: () => worker, signal: controller.signal });
     controller.abort();
     await expect(pending).rejects.toThrow("cancelled");
-    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(worker.terminate).toHaveBeenCalled();
+  });
+
+  it("cancels within a bound when a checkpoint write hangs", async () => {
+    const controller = new AbortController();
+    const worker = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onerror: null,
+      postMessage(data: { requestId: string }) {
+        worker.onmessage?.({ data: { kind: "progress", requestId: data.requestId, completed: 1, total: 1, text: "P1" } } as MessageEvent);
+      },
+      terminate: vi.fn(),
+    };
+    const pending = requestLocalWorker("process", new Uint8Array([1]), {
+      createWorker: () => worker as unknown as Worker,
+      signal: controller.signal,
+      checkpointAbortMs: 30,
+      onProgress: () => new Promise(() => undefined),
+    });
+    await Promise.resolve();
+    controller.abort();
+    const started = Date.now();
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(worker.terminate).toHaveBeenCalled();
   });
 });
 
