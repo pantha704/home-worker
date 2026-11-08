@@ -273,6 +273,7 @@ def create_app(
             "Accept",
             "Authorization",
             "Content-Type",
+            "Idempotency-Key",
             "X-Homeworker-Client",
             "X-Request-ID",
         ],
