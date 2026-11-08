@@ -50,3 +50,7 @@ CLAUDE.md
 .homeworker-goals.md
 .homeworker-issues.md
 
+# EGM working copies (publish approved specs under docs/designs/)
+/concepts_brief.md
+/design_draft.md
+

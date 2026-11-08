@@ -16,5 +16,6 @@ These documents describe the production intent of the local-first vertical slice
 - [Test strategy and SLOs](test-strategy-and-slos.md): release gates and reliability targets.
 - [Contributing](contributing.md): safe change workflow.
 - [Architecture decisions](adrs/README.md): durable decisions and their consequences.
+- [EGM design index](designs/SITEMAP.md): approved Elephant-Goldfish specifications.
 
 `CONTEXT.md`, `PLAN.md`, and `AGENTS.md` at the repository root take precedence if a document becomes stale.
