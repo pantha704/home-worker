@@ -57,19 +57,6 @@ describe("browser-local PDF engine", () => {
     ]);
   });
 
-  it("resumes extraction after a completed page checkpoint", async () => {
-    const pdf = await PDFDocument.create();
-    const font = await pdf.embedFont(StandardFonts.Helvetica);
-    for (const text of ["First page marker", "Second page marker", "Third page marker"]) {
-      const page = pdf.addPage([400, 600]);
-      page.drawText(text, { x: 40, y: 540, size: 16, font });
-    }
-    await expect(extractTextPages(await pdf.save(), undefined, 2)).resolves.toEqual([
-      { pageNumber: 2, text: "Second page marker" },
-      { pageNumber: 3, text: "Third page marker" },
-    ]);
-  });
-
   it("extracts the rights-cleared typed corpus fixture", async () => {
     const pages = await extractTextPages(new Uint8Array(await readFile("../../fixtures/sample-typed.pdf")));
     const text = pages.map((page) => page.text).join("\n");
@@ -136,7 +123,7 @@ describe("browser-local PDF engine", () => {
     const textPage = pdf.addPage();
     textPage.drawText("Usable", { x: 40, y: 700, size: 16, font });
     pdf.addPage();
-    await expect(extractTextPages(await pdf.save(), undefined, 1, true)).resolves.toEqual([
+    await expect(extractTextPages(await pdf.save(), undefined, true)).resolves.toEqual([
       { pageNumber: 1, text: "Usable" },
       { pageNumber: 2, text: "" },
     ]);

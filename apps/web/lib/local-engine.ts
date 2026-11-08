@@ -96,7 +96,6 @@ async function rejectParsedPdf(document: PDFDocumentProxy): Promise<void> {
 export async function extractTextPages(
   source: Uint8Array,
   onPage?: (pageNumber: number, totalPages: number, text: string) => void,
-  startPage = 1,
   allowEmpty = false,
 ): Promise<ExtractedTextPage[]> {
   let document;
@@ -118,11 +117,8 @@ export async function extractTextPages(
   if (document.numPages > MAX_SOURCE_PAGES) {
     throw new Error(`PDFs with more than ${MAX_SOURCE_PAGES} pages are not supported.`);
   }
-  if (startPage < 1 || startPage > document.numPages) {
-    throw new Error("Processing checkpoint does not match this document.");
-  }
   const pages: ExtractedTextPage[] = [];
-  for (let pageNumber = startPage; pageNumber <= document.numPages; pageNumber += 1) {
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const sourcePage = await document.getPage(pageNumber);
     const pageActions = await sourcePage.getJSActions();
     if (pageActions && Object.keys(pageActions).length > 0) {

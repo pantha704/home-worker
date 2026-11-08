@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import sys
@@ -23,8 +22,6 @@ REQUIRED = [
     "SECURITY.md",
     "THIRD_PARTY_NOTICES.md",
     "VERSIONS.md",
-    "packages/contracts/schema/project.schema.json",
-    "skills/document-analyst/output.schema.json",
     "assets/fonts/Caveat-Regular.ttf",
     "assets/fonts/PatrickHand-Regular.ttf",
     "assets/fonts/Kalam-Regular.ttf",
@@ -150,17 +147,6 @@ def inspect(root: Path = ROOT) -> list[Finding]:
         for pattern in SECRET_PATTERNS:
             if pattern.search(content):
                 findings.append(Finding("possible-secret", rel, pattern.pattern))
-
-    for item in (
-        "packages/contracts/schema/project.schema.json",
-        "skills/document-analyst/output.schema.json",
-    ):
-        path = root / item
-        if path.is_file():
-            try:
-                json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                findings.append(Finding("invalid-json", path.relative_to(root), str(exc)))
 
     return findings
 

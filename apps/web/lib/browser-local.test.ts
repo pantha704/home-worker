@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { describe, expect, it, vi } from "vitest";
 
 import { createBrowserProject, ensureStorageCapacity, requestLocalWorker, validateLocalPdfSource, validateLocalSource, withProjectLock } from "@/lib/browser-local";
-import { LocalProjectRepository, sha256, type LocalObjectStore } from "@/lib/local-store";
+import { LocalProjectRepository, type LocalObjectStore } from "@/lib/local-store";
 import { MAX_UPLOAD_BYTES } from "@/lib/validation";
 
 describe("browser-local safety gates", () => {
@@ -191,30 +191,6 @@ describe("browser-local safety gates", () => {
     await expect(pending).rejects.toThrow("cancelled");
     expect(worker.terminate).toHaveBeenCalled();
   });
-
-  it("cancels within a bound when a checkpoint write hangs", async () => {
-    const controller = new AbortController();
-    const worker = {
-      onmessage: null as ((event: MessageEvent) => void) | null,
-      onerror: null,
-      postMessage(data: { requestId: string }) {
-        worker.onmessage?.({ data: { kind: "progress", requestId: data.requestId, completed: 1, total: 1, text: "P1" } } as MessageEvent);
-      },
-      terminate: vi.fn(),
-    };
-    const pending = requestLocalWorker("process", new Uint8Array([1]), {
-      createWorker: () => worker as unknown as Worker,
-      signal: controller.signal,
-      checkpointAbortMs: 30,
-      onProgress: () => new Promise(() => undefined),
-    });
-    await Promise.resolve();
-    controller.abort();
-    const started = Date.now();
-    await expect(pending).rejects.toThrow("cancelled");
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(worker.terminate).toHaveBeenCalled();
-  });
 });
 
 class MemoryObjects implements LocalObjectStore {
@@ -229,127 +205,11 @@ class MemoryObjects implements LocalObjectStore {
   async delete(digest: string) { this.values.delete(digest); }
 }
 
-describe("browser-local checkpoints", () => {
+describe("browser-local project creation", () => {
   const storage = {
     estimate: vi.fn().mockResolvedValue({ quota: 100_000_000, usage: 0 }),
     persist: vi.fn().mockResolvedValue(true),
   };
-  const locks = {
-    request: (_name: string, _opts: unknown, operation: () => Promise<unknown>) => operation(),
-  } as unknown as LockManager;
-
-  it("keeps a checkpoint when cancelled after the worker and resumes by rendering it", async () => {
-    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
-    const source = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const file = new File([source], "notes.png", { type: "image/png" });
-    const controller = new AbortController();
-    const worker = {
-      onmessage: null as ((event: MessageEvent) => void) | null,
-      onerror: null,
-      postMessage(data: { requestId: string }) {
-        worker.onmessage?.({ data: { kind: "result", requestId: data.requestId, text: "HOMEWORKER", pdf: new Uint8Array([1]) } } as MessageEvent);
-        controller.abort();
-      },
-      terminate: vi.fn(),
-    };
-
-    await expect(createBrowserProject(file, {
-      signal: controller.signal,
-      createWorker: () => worker as unknown as Worker,
-      repository: repo,
-      storage,
-      locks,
-    })).rejects.toThrow("cancelled");
-
-    const digest = await sha256(source);
-    expect(await repo.getCheckpoint(digest)).toMatchObject({ text: "HOMEWORKER" });
-    await expect(repo.get("missing")).rejects.toThrow();
-
-    const resumed = await createBrowserProject(file, {
-      createWorker: () => worker as unknown as Worker,
-      repository: repo,
-      storage,
-      locks,
-    });
-    expect(resumed.text).toBe("HOMEWORKER");
-    expect(await repo.getCheckpoint(digest)).toBeUndefined();
-  });
-
-  it("persists blank and native pages from worker progress then resumes without skipping", async () => {
-    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
-    const source = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const file = new File([source], "notes.png", { type: "image/png" });
-    const controller = new AbortController();
-    const worker = {
-      onmessage: null as ((event: MessageEvent) => void) | null,
-      onerror: null,
-      postMessage(data: { requestId: string; resumeFrom?: number; priorPages?: string[] }) {
-        const id = data.requestId;
-        if (data.priorPages?.length === 2) {
-          worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 3, total: 5, text: "P3" } } as MessageEvent);
-          worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 4, total: 5, text: "P4" } } as MessageEvent);
-          worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 5, total: 5, text: "P5" } } as MessageEvent);
-          worker.onmessage?.({ data: { kind: "result", requestId: id, text: "P1\n\n\n\nP3\n\nP4\n\nP5", pdf: new Uint8Array([1]) } } as MessageEvent);
-          return;
-        }
-        worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 1, total: 5, text: "P1" } } as MessageEvent);
-        worker.onmessage?.({ data: { kind: "progress", requestId: id, completed: 2, total: 5, text: "" } } as MessageEvent);
-        controller.abort();
-      },
-      terminate: vi.fn(),
-    };
-
-    await expect(createBrowserProject(file, {
-      signal: controller.signal,
-      createWorker: () => worker as unknown as Worker,
-      repository: repo,
-      storage,
-      locks,
-    })).rejects.toThrow("cancelled");
-
-    const digest = await sha256(source);
-    expect(await repo.getCheckpoint(digest)).toMatchObject({ pages: ["P1", ""], total: 5 });
-
-    const resumed = await createBrowserProject(file, {
-      createWorker: () => worker as unknown as Worker,
-      repository: repo,
-      storage,
-      locks,
-    });
-    expect(resumed.text).toBe("P1\n\n\n\nP3\n\nP4\n\nP5");
-    expect(await repo.getCheckpoint(digest)).toBeUndefined();
-  });
-
-  it("waits for checkpoint writes before resolving a worker result", async () => {
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const onProgress = vi.fn(() => gate);
-    const worker = {
-      onmessage: null as ((event: MessageEvent) => void) | null,
-      onerror: null,
-      postMessage(data: { requestId: string }) {
-        worker.onmessage?.({ data: { kind: "progress", requestId: data.requestId, completed: 1, total: 1, text: "P1" } } as MessageEvent);
-        worker.onmessage?.({ data: { kind: "result", requestId: data.requestId, pdf: new Uint8Array([1]) } } as MessageEvent);
-      },
-      terminate: vi.fn(),
-    };
-    let resolved = false;
-    const pending = requestLocalWorker("render", "text", {
-      createWorker: () => worker as unknown as Worker,
-      onProgress,
-    }).then((result) => {
-      resolved = true;
-      return result;
-    });
-    await Promise.resolve();
-    expect(onProgress).toHaveBeenCalledWith({ completed: 1, total: 1, text: "P1" });
-    expect(resolved).toBe(false);
-    release?.();
-    await pending;
-    expect(resolved).toBe(true);
-  });
 
   it("uses one persist lock for create and does not fail create when cleanup throws", async () => {
     const names: string[] = [];

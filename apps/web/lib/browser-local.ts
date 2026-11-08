@@ -1,4 +1,4 @@
-import { EXTRACTION_VERSION, LocalProjectRepository, sha256, type LocalObjectStore, type LocalProject } from "@/lib/local-store";
+import { LocalProjectRepository, sha256, type LocalObjectStore, type LocalProject } from "@/lib/local-store";
 import { extractTextPages, sniffSource } from "@/lib/local-engine";
 import { MAX_ARCHIVE_BYTES, MAX_UPLOAD_BYTES } from "@/lib/validation";
 
@@ -22,13 +22,10 @@ interface WorkerRequestOptions {
   createWorker?: () => Worker;
   requestId?: string;
   signal?: AbortSignal;
-  checkpointAbortMs?: number;
   onProgress?: (progress: { completed: number; total: number; text?: string }) => void | Promise<void>;
   onProcessing?: () => void;
   onFinalizing?: () => void;
   onCleanupError?: (error: Error) => void;
-  resumeFrom?: number;
-  priorPages?: string[];
   repository?: LocalProjectRepository;
   storage?: StorageGate;
   locks?: LockManager;
@@ -56,7 +53,6 @@ const DB_NAME = "homeworker-local-v1";
 const RESERVE_BYTES = 10 * 1024 * 1024;
 const WORKER_TIMEOUT_MS = 120_000;
 export const PERSIST_LOCK = "homeworker:persist";
-export const CHECKPOINT_ABORT_MS = 2_000;
 
 export function validateLocalPdfSource(source: Uint8Array): void {
   if (source.length > MAX_UPLOAD_BYTES) throw new Error("This PDF is larger than the 25 MB local limit.");
@@ -178,7 +174,6 @@ export function requestLocalWorker(
       ?? (() => new Worker(new URL("../workers/local-document.worker.ts", import.meta.url), { type: "module" }));
     const worker = createWorker();
     let settled = false;
-    let progressChain = Promise.resolve();
     const finish = (operation: () => void) => {
       if (settled) return;
       settled = true;
@@ -187,24 +182,11 @@ export function requestLocalWorker(
       worker.terminate();
       operation();
     };
-    const finishAfterProgress = (operation: () => void) => {
-      void progressChain.then(
-        () => finish(operation),
-        (error) => finish(() => reject(error instanceof Error ? error : new Error("Checkpoint write failed."))),
-      );
-    };
     const abort = () => {
-      worker.terminate();
-      const capMs = options.checkpointAbortMs ?? CHECKPOINT_ABORT_MS;
-      const cap = new Promise<void>((resolve) => {
-        window.setTimeout(resolve, capMs);
-      });
-      void Promise.race([progressChain.then(() => undefined, () => undefined), cap]).then(() => {
-        finish(() => reject(new Error("Local document processing was cancelled.")));
-      });
+      finish(() => reject(new Error("Local document processing was cancelled.")));
     };
     const timeout = window.setTimeout(() => {
-      finishAfterProgress(() => reject(new Error("Local document processing timed out.")));
+      finish(() => reject(new Error("Local document processing timed out.")));
     }, options.timeoutMs ?? WORKER_TIMEOUT_MS);
     worker.onmessage = (event: MessageEvent<WorkerResult | WorkerFailure | WorkerProgress | unknown>) => {
       const response = event.data;
@@ -216,19 +198,19 @@ export function requestLocalWorker(
           total: response.total,
           ...(typeof response.text === "string" ? { text: response.text } : {}),
         };
-        progressChain = progressChain.then(() => options.onProgress?.(progress)).then(() => undefined);
+        void options.onProgress?.(progress);
         return;
       }
       if (!isWorkerResponse(response)) {
-        finishAfterProgress(() => reject(new Error("The local document worker returned an invalid response.")));
+        finish(() => reject(new Error("The local document worker returned an invalid response.")));
         return;
       }
       if (response.requestId !== requestId) return;
-      if (response.kind === "error") finishAfterProgress(() => reject(new Error(response.error)));
-      else finishAfterProgress(() => resolve(response));
+      if (response.kind === "error") finish(() => reject(new Error(response.error)));
+      else finish(() => resolve(response));
     };
     worker.onerror = () => {
-      finishAfterProgress(() => reject(new Error("The local document worker stopped unexpectedly.")));
+      finish(() => reject(new Error("The local document worker stopped unexpectedly.")));
     };
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) {
@@ -237,13 +219,7 @@ export function requestLocalWorker(
     }
     if (payload instanceof Uint8Array) {
       const copy = payload.slice();
-      worker.postMessage({
-        action,
-        requestId,
-        source: copy,
-        resumeFrom: options.resumeFrom,
-        priorPages: options.priorPages,
-      }, [copy.buffer]);
+      worker.postMessage({ action, requestId, source: copy }, [copy.buffer]);
     } else {
       worker.postMessage({ action, requestId, text: payload });
     }
@@ -258,61 +234,17 @@ export async function createBrowserProject(
   const mimeType = validateLocalSource(source);
   await ensureStorageCapacity(source.length, options.storage);
   const repo = options.repository ?? browserRepository();
-  const digest = await sha256(source);
-  const checkpoint = await repo.getCheckpoint(digest);
-  const pages = checkpoint?.pages.slice() ?? [];
   options.onProcessing?.();
-  let text = typeof checkpoint?.text === "string" && checkpoint.text.trim() ? checkpoint.text : undefined;
-  let pdf: Uint8Array;
-  if (text) {
-    const result = await requestLocalWorker("render", text, options);
-    pdf = result.pdf;
-  } else {
-    const result = await requestLocalWorker("process", source, {
-      ...options,
-      resumeFrom: pages.length + 1,
-      priorPages: pages,
-      onProgress: async (progress) => {
-        if (typeof progress.text === "string") {
-          if (progress.completed === pages.length + 1) {
-            pages.push(progress.text);
-            await repo.saveCheckpoint({
-              digest,
-              filename: file.name,
-              mimeType,
-              pages: pages.slice(),
-              total: progress.total,
-              extractionVersion: EXTRACTION_VERSION,
-              updatedAt: new Date().toISOString(),
-            });
-          } else if (progress.completed > pages.length + 1) {
-            throw new Error("Out-of-order processing checkpoint");
-          }
-        }
-        await options.onProgress?.(progress);
-      },
-    });
-    if (typeof result.text !== "string") {
-      throw new Error(`The local worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
-    }
-    text = result.text;
-    pdf = result.pdf;
-    await repo.saveCheckpoint({
-      digest,
-      filename: file.name,
-      mimeType,
-      pages: pages.length > 0 ? pages : [text],
-      total: Math.max(pages.length, 1),
-      text,
-      extractionVersion: EXTRACTION_VERSION,
-      updatedAt: new Date().toISOString(),
-    });
+  const result = await requestLocalWorker("process", source, options);
+  if (typeof result.text !== "string") {
+    throw new Error(`The local worker returned no text (${Object.keys(result).join(", ") || "empty response"}).`);
   }
+  const text = result.text;
+  const pdf = result.pdf;
   return withPersistLock(async () => {
     if (options.signal?.aborted) throw new Error("Local document processing was cancelled.");
     options.onFinalizing?.();
     const project = await repo.create({ filename: file.name, mimeType, source, text, exportPdf: pdf });
-    await repo.deleteCheckpoint(digest);
     try {
       await repo.sweepOrphans();
     } catch (error) {

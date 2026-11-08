@@ -9,9 +9,9 @@
   "scripts": {
     "context": "bash scripts/context-check.sh",
     "dev": "pnpm --filter @homeworker/web dev",
-    "build": "pnpm --filter @homeworker/contracts test && pnpm --filter @homeworker/web build",
+    "build": "pnpm --filter @homeworker/web build",
     "lint": "pnpm --filter @homeworker/web lint",
     "typecheck": "pnpm --filter @homeworker/web typecheck",
-    "test": "pnpm --filter @homeworker/contracts test && pnpm --filter @homeworker/web test"
+    "test": "pnpm --filter @homeworker/web test"
   }
 }

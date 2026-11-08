@@ -21,25 +21,23 @@ function loadHandwritingFont(): Promise<Uint8Array> {
 }
 
 type Request =
-  | { action: "process"; requestId: string; source: Uint8Array; resumeFrom?: number; priorPages?: string[] }
+  | { action: "process"; requestId: string; source: Uint8Array }
   | { action: "render"; requestId: string; text: string };
 
 async function extractSource(request: Extract<Request, { action: "process" }>): Promise<string> {
   const mime = sniffSource(request.source);
   const assets = browserOcrAssets(self.location.origin);
-  const prior = Array.isArray(request.priorPages) ? request.priorPages.filter((page) => typeof page === "string") : [];
   if (mime !== "application/pdf") {
-    if (prior.length > 0) return prior.join("\n\n");
     self.postMessage({ kind: "progress", requestId: request.requestId, completed: 0, total: 1 });
     const text = await extractImageText(request.source, assets);
     self.postMessage({ kind: "progress", requestId: request.requestId, completed: 1, total: 1, text });
     return text;
   }
-  const pages = await extractTextPages(request.source, undefined, request.resumeFrom ?? 1, true);
+  const pages = await extractTextPages(request.source, undefined, true);
   if (pages.filter((page) => page.text.trim() === "").length > MAX_BROWSER_OCR_PAGES) {
     throw new Error(`Browser OCR supports at most ${MAX_BROWSER_OCR_PAGES} scanned pages. Use the full local application for longer scans.`);
   }
-  const total = pages.at(-1)?.pageNumber ?? prior.length;
+  const total = pages.length;
   const texts: string[] = [];
   for (const page of pages) {
     let text = page.text;
@@ -55,7 +53,7 @@ async function extractSource(request: Extract<Request, { action: "process" }>): 
       text,
     });
   }
-  return [...prior, ...texts].join("\n\n");
+  return texts.join("\n\n");
 }
 
 self.onmessage = async (event: MessageEvent<Request>) => {
