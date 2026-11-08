@@ -14,11 +14,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
-
-def to_camel(value: str) -> str:
-    first, *rest = value.split("_")
-    return first + "".join(part.capitalize() for part in rest)
+from pydantic.alias_generators import to_camel
 
 
 class ApiModel(BaseModel):
