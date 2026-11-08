@@ -44,12 +44,12 @@ jobs:
       INK_TEST_DATABASE_URL: postgresql+psycopg://homeworker:homeworker@localhost:5432/homeworker
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6.3.0
+        uses: actions/setup-python@v7.1.0
         with:
           # A bare minor version resolves from the runner's preinstalled tool cache;
           # pinning an exact patch forces a download that intermittently 504s
@@ -58,7 +58,7 @@ jobs:
           python-version: "3.14"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v8.3.2
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: 0.11.28
           enable-cache: true
@@ -85,7 +85,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
@@ -117,18 +117,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.1.1
         with:
           version: 11.18.0
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: 24.18.0
           cache: pnpm
@@ -176,7 +176,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Check out source
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
