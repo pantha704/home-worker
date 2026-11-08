@@ -11,3 +11,5 @@ Before each execution block:
 7. Report changed paths, commands run, failures, and remaining integration work.
 
 Never weaken provenance, uncertainty visibility, consent controls, or print fidelity to make a demo appear successful.
+
+EGM artifact directory: docs/designs

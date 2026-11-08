@@ -9,6 +9,7 @@ Homeworker is a document-fidelity and safety product, not a handwriting-font dem
 3. Identify contract, provenance, privacy, threat, accessibility, print, and migration impact.
 4. Keep work inside the component boundary or coordinate ownership first.
 5. Prefer the smallest deterministic, testable implementation.
+6. For a feature or architectural change, run EGM (`egm-brainstorm` → `egm-draft` → `egm-review`) and land the approved spec in `docs/designs/` before implementation. Skip that for a small bug fix.
 
 ## Local checks
 
