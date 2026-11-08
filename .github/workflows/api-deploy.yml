@@ -1,0 +1,56 @@
+name: Deploy API
+
+# Render reports autoDeploy: yes, but every deploy on this service was trigger=api —
+# its GitHub webhook never fires, so a merged backend change could sit undeployed
+# while CI stayed green. This job closes that loop, then proves the deploy.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/api/**"
+      - "infra/docker/Dockerfile.api"
+      - "scripts/render_deploy.py"
+      - ".github/workflows/api-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      clearCache:
+        description: Clear the Render build cache before deploying
+        type: choice
+        options: [do_not_clear, clear]
+        default: do_not_clear
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy and verify the live API
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Fail early when the deploy credentials are missing
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          [ -n "${RENDER_API_KEY}" ] || { echo "::error::secret RENDER_API_KEY is not set"; exit 1; }
+          [ -n "${RENDER_SERVICE_ID}" ] || { echo "::error::variable RENDER_SERVICE_ID is not set"; exit 1; }
+
+      - name: Deploy this commit, wait for it, and verify it serves
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+          HOMEWORKER_API_URL: ${{ vars.HOMEWORKER_API_URL }}
+          CLEAR_CACHE: ${{ inputs.clearCache }}
+        run: |
+          set -euo pipefail
+          args=(--commit "${{ github.sha }}")
+          if [ "${CLEAR_CACHE:-do_not_clear}" = "clear" ]; then args+=(--clear-cache); fi
+          python3 scripts/render_deploy.py "${args[@]}"
