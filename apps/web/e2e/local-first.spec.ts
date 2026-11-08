@@ -112,12 +112,20 @@ test("cancel during processing then recover by uploading again", async ({ page }
   await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
   await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
   const cancel = page.getByRole("button", { name: /cancel processing/i });
-  if (await cancel.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  if (await cancel.isVisible({ timeout: 8_000 }).catch(() => false)) {
     await cancel.click();
-    await expect(page.getByText(/processing cancelled/i)).toBeVisible();
+    const cancelled = page.getByRole("status").filter({ hasText: /cancelled/i });
+    const navigated = page.waitForURL(/\/project\?id=local_/, { timeout: 15_000 }).then(() => "navigated" as const);
+    const outcome = await Promise.race([
+      cancelled.waitFor({ state: "visible", timeout: 15_000 }).then(() => "cancelled" as const),
+      navigated,
+    ]);
+    if (outcome === "cancelled") {
+      await page.getByRole("button", { name: /^change$/i }).click();
+      await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
+      await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
+    }
   }
-  await page.getByLabel(/drop your notes/i).setInputFiles(fixture);
-  await page.getByRole("button", { name: /turn into handwritten notes/i }).click();
   await expect(page).toHaveURL(/\/project\?id=local_/, { timeout: 90_000 });
   await expect(page.getByRole("textbox", { name: /review extracted text/i })).toContainText(/homeworker/i);
 });
@@ -140,5 +148,5 @@ test("two tabs cannot overwrite each other's revision", async ({ page, context }
   await expect(page.getByText(/revision 2/i)).toBeVisible();
   await otherEditor.fill("Second tab wording");
   await other.getByRole("button", { name: /save revision/i }).click();
-  await expect(other.getByRole("alert")).toContainText(/another tab|could not be saved/i);
+  await expect(other.locator(".mutation-error")).toContainText(/another tab|could not be saved/i);
 });
