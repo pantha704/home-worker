@@ -17,5 +17,6 @@ These documents describe the production intent of the local-first vertical slice
 - [Contributing](contributing.md): safe change workflow.
 - [Architecture decisions](adrs/README.md): durable decisions and their consequences.
 - [EGM design index](designs/SITEMAP.md): approved Elephant-Goldfish specifications.
+- [Static browser-local preview](static-preview.md): GitHub Pages export and its limits.
 
 `CONTEXT.md`, `PLAN.md`, and `AGENTS.md` at the repository root take precedence if a document becomes stale.
