@@ -92,10 +92,3 @@ async def require_identity(request: Request) -> Identity:
     identity = await run_in_threadpool(verifier.verify, match.group(1))
     request.state.identity = identity
     return identity
-
-
-def request_owner(request: Request) -> str:
-    identity = getattr(request.state, "identity", None)
-    if not isinstance(identity, Identity):
-        raise RuntimeError("authenticated identity was not attached to the request")
-    return identity.owner_id

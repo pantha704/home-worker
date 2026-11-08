@@ -251,10 +251,3 @@ def validate_document(path: Path, mime_type: str, settings: Settings) -> None:
 def remove_project_storage(settings: Settings, project_id: str) -> None:
     """Remove non-authoritative staged bytes after processing or upload failure."""
     shutil.rmtree(settings.work_root / "projects" / project_id, ignore_errors=True)
-
-
-def delete_project_storage(settings: Settings, project_id: str) -> None:
-    """Strict deletion for a staged working directory, kept for compatibility."""
-    project_dir = settings.work_root / "projects" / project_id
-    if project_dir.exists():
-        shutil.rmtree(project_dir)

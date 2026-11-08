@@ -1,6 +1,5 @@
 import type {
   ApiError as ApiErrorBody,
-  ArtifactManifest,
   Persona,
   ProjectDocument,
   ProjectList,
@@ -138,17 +137,6 @@ export async function getProject(
   signal?: AbortSignal,
 ): Promise<ProjectDocument> {
   return request<ProjectDocument>(`/v1/projects/${encodeURIComponent(projectId)}`, {}, signal);
-}
-
-export async function getExtractionEvidence(
-  projectId: string,
-  signal?: AbortSignal,
-): Promise<ProjectDocument> {
-  return request<ProjectDocument>(
-    `/v1/projects/${encodeURIComponent(projectId)}/source.json`,
-    {},
-    signal,
-  );
 }
 
 export async function updateBlock(
@@ -308,19 +296,6 @@ export async function fetchArtifact(
     filename,
     sha256: response.headers.get("x-artifact-sha256"),
   };
-}
-
-export async function getArtifactManifest(
-  projectId: string,
-  revision: number,
-  kind: ArtifactKind = "handwritten_pdf",
-  signal?: AbortSignal,
-): Promise<ArtifactManifest> {
-  return request<ArtifactManifest>(
-    `/v1/projects/${encodeURIComponent(projectId)}/manifest.json?revision=${revision}&kind=${kind}`,
-    {},
-    signal,
-  );
 }
 
 export function saveBlob(download: ArtifactDownload): void {
