@@ -1,20 +1,5 @@
-@font-face {
-  font-family: "Ink Scholar";
-  font-display: swap;
-  src: url("/fonts/Kalam-Regular.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Ink Casual";
-  font-display: swap;
-  src: url("/fonts/Caveat-Regular.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Ink Compact";
-  font-display: swap;
-  src: url("/fonts/PatrickHand-Regular.woff2") format("woff2");
-}
+/* Persona @font-face rules live in app/layout.tsx so their URLs can carry a
+   host path prefix (for example a GitHub Pages project subdirectory). */
 
 :root {
   --canvas: #f4f2ec;

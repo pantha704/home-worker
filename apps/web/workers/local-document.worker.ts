@@ -1,12 +1,13 @@
 /// <reference lib="webworker" />
 
+import { getBasePath } from "@/lib/config";
 import { extractTextPages, MAX_BROWSER_OCR_PAGES, rasterizePdfPage, renderA4Pdf, sniffSource } from "@/lib/local-engine";
 import { browserOcrAssets, extractImageText } from "@/lib/local-ocr";
 
 let handwritingFont: Promise<Uint8Array> | undefined;
 
 function loadHandwritingFont(): Promise<Uint8Array> {
-  handwritingFont ??= fetch("/fonts/Kalam-Regular.ttf")
+  handwritingFont ??= fetch(`${getBasePath()}/fonts/Kalam-Regular.ttf`)
     .then((response) => {
       if (!response.ok) throw new Error("The handwriting font could not be loaded.");
       return response.arrayBuffer();

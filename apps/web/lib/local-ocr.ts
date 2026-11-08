@@ -1,5 +1,6 @@
 import { createWorker } from "tesseract.js";
 
+import { getBasePath } from "@/lib/config";
 import { assertImagePixelLimit, sniffSource } from "@/lib/local-engine";
 import { MAX_UPLOAD_BYTES } from "@/lib/validation";
 
@@ -9,12 +10,15 @@ export interface OcrAssets {
   langPath: string;
 }
 
-export function browserOcrAssets(origin = typeof location !== "undefined" ? location.origin : ""): OcrAssets {
+export function browserOcrAssets(
+  origin = typeof location !== "undefined" ? location.origin : "",
+  basePath = getBasePath(),
+): OcrAssets {
   if (!/^https?:/.test(origin)) throw new Error("Browser OCR assets are not configured.");
   return {
-    workerPath: `${origin}/tesseract/worker.min.js`,
-    corePath: `${origin}/tesseract/core`,
-    langPath: `${origin}/tesseract/lang`,
+    workerPath: `${origin}${basePath}/tesseract/worker.min.js`,
+    corePath: `${origin}${basePath}/tesseract/core`,
+    langPath: `${origin}${basePath}/tesseract/lang`,
   };
 }
 
