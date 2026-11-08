@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import tempfile
 import uuid
@@ -19,19 +18,9 @@ from .extraction import enforce_total_text_limit, extract_document
 from .ingestion import EXTENSIONS
 from .models import ProjectStatus
 from .service import complete_processing, fail_processing
-from .storage import ObjectStore
+from .storage import ObjectStore, digest_file
 
 logger = logging.getLogger("homeworker.worker")
-
-
-def _sha256_file(path: Path) -> tuple[int, str]:
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as source:
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
-    return size, digest.hexdigest()
 
 
 def process_job(
@@ -51,7 +40,7 @@ def process_job(
     with tempfile.TemporaryDirectory(prefix="homeworker-job-", dir=settings.work_root) as raw:
         path = Path(raw) / f"source{suffix}"
         object_store.get_to_path(source.source_key, path)
-        actual_size, actual_digest = _sha256_file(path)
+        actual_size, actual_digest = digest_file(path)
         if actual_size != source.source_size or actual_digest != source.project.sha256:
             raise InkError(
                 "SOURCE_INTEGRITY_FAILED",

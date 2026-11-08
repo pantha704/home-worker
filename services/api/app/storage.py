@@ -69,14 +69,22 @@ def artifact_object_key(
     )
 
 
-def _copy_stream(source: BinaryIO, destination: BinaryIO) -> tuple[int, str]:
+def _copy_stream(source: BinaryIO, destination: BinaryIO | None = None) -> tuple[int, str]:
+    """Stream `source`, optionally writing it out, and return size plus SHA-256."""
     digest = hashlib.sha256()
     size = 0
     while chunk := source.read(1024 * 1024):
-        destination.write(chunk)
+        if destination is not None:
+            destination.write(chunk)
         digest.update(chunk)
         size += len(chunk)
     return size, digest.hexdigest()
+
+
+def digest_file(path: Path) -> tuple[int, str]:
+    """Size and SHA-256 of a local file, streamed in 1 MiB chunks."""
+    with path.open("rb") as source:
+        return _copy_stream(source)
 
 
 class LocalObjectStore:

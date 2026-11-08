@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -15,6 +16,12 @@ from pydantic import (
     model_validator,
 )
 from pydantic.alias_generators import to_camel
+
+
+def _reject_nul(value: str) -> str:
+    if "\x00" in value:
+        raise ValueError("text must not contain NUL characters")
+    return value
 
 
 class ApiModel(BaseModel):
@@ -151,16 +158,12 @@ class ProjectList(ApiModel):
     total: int = Field(ge=0)
 
 
-class BlockPatch(ApiModel):
-    text: str = Field(max_length=200_000)
-    expected_revision: int = Field(ge=1)
+EditableText = Annotated[str, StringConstraints(max_length=200_000), AfterValidator(_reject_nul)]
 
-    @field_validator("text")
-    @classmethod
-    def reject_nul(cls, value: str) -> str:
-        if "\x00" in value:
-            raise ValueError("text must not contain NUL characters")
-        return value
+
+class BlockPatch(ApiModel):
+    text: EditableText
+    expected_revision: int = Field(ge=1)
 
 
 class BlockReviewRequest(ApiModel):
@@ -168,15 +171,8 @@ class BlockReviewRequest(ApiModel):
 
 
 class PageTextPatch(ApiModel):
-    text: str = Field(max_length=200_000)
+    text: EditableText
     expected_revision: int = Field(ge=1)
-
-    @field_validator("text")
-    @classmethod
-    def reject_nul(cls, value: str) -> str:
-        if "\x00" in value:
-            raise ValueError("text must not contain NUL characters")
-        return value
 
 
 class RetryPagesRequest(ApiModel):

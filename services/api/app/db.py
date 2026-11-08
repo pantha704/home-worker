@@ -30,7 +30,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import CursorResult, Engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from .errors import InkError
 from .models import ProjectDocument, ProjectList, ProjectStatus, ProjectSummary
@@ -199,6 +199,20 @@ class ArtifactRecord:
     media_type: str
     created_at: datetime
 
+    @classmethod
+    def from_row(cls, row: ArtifactRow) -> ArtifactRecord:
+        return cls(
+            project_id=row.project_id,
+            revision=row.revision,
+            kind=row.kind,
+            owner_id=row.owner_id,
+            object_key=row.object_key,
+            sha256=row.sha256,
+            size=row.size,
+            media_type=row.media_type,
+            created_at=row.created_at,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ExpiredProject:
@@ -284,27 +298,36 @@ class ProjectRepository:
                 )
                 or 0
             )
-            source_bytes = (
-                session.scalar(
-                    select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
-                        ProjectRow.owner_id == owner_id
-                    )
-                )
-                or 0
-            )
-            artifact_bytes = (
-                session.scalar(
-                    select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
-                        ArtifactRow.owner_id == owner_id
-                    )
-                )
-                or 0
-            )
+            source_bytes = self._source_bytes(session, owner_id)
+            artifact_bytes = self._artifact_bytes(session, owner_id)
         return ProjectStorageUsage(
             project_count=int(project_count),
-            source_bytes=int(source_bytes),
-            artifact_bytes=int(artifact_bytes),
+            source_bytes=source_bytes,
+            artifact_bytes=artifact_bytes,
         )
+
+    def _source_bytes(self, session: Session, owner_id: str) -> int:
+        return int(
+            session.scalar(
+                select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
+                    ProjectRow.owner_id == owner_id
+                )
+            )
+            or 0
+        )
+
+    def _artifact_bytes(self, session: Session, owner_id: str) -> int:
+        return int(
+            session.scalar(
+                select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
+                    ArtifactRow.owner_id == owner_id
+                )
+            )
+            or 0
+        )
+
+    def _stored_bytes(self, session: Session, owner_id: str) -> int:
+        return self._source_bytes(session, owner_id) + self._artifact_bytes(session, owner_id)
 
     def create(
         self,
@@ -340,23 +363,7 @@ class ProjectRepository:
                     status_code=409,
                     details={"maxProjects": self.max_projects},
                 )
-            stored_bytes = (
-                session.scalar(
-                    select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
-                        ProjectRow.owner_id == owner_id
-                    )
-                )
-                or 0
-            )
-            artifact_bytes = (
-                session.scalar(
-                    select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
-                        ArtifactRow.owner_id == owner_id
-                    )
-                )
-                or 0
-            )
-            if int(stored_bytes) + int(artifact_bytes) + source_size > self.max_storage_bytes:
+            if self._stored_bytes(session, owner_id) + source_size > self.max_storage_bytes:
                 raise InkError(
                     "STORAGE_QUOTA_EXCEEDED",
                     "This account reached its private storage allowance. "
@@ -634,6 +641,53 @@ class ProjectRepository:
                 ) from exc
             return updated_project
 
+    def _purge_project(
+        self,
+        session: Session,
+        *,
+        project_id: str,
+        owner_id: str,
+        source_key: str,
+        now: datetime,
+    ) -> list[str]:
+        """Queue a project's objects for cleanup and delete its child rows."""
+        artifact_keys = list(
+            session.scalars(
+                select(ArtifactRow.object_key).where(
+                    ArtifactRow.project_id == project_id,
+                    ArtifactRow.owner_id == owner_id,
+                )
+            ).all()
+        )
+        object_keys = [source_key, *artifact_keys]
+        for object_key in object_keys:
+            session.merge(
+                ObjectDeletionRow(
+                    object_key=object_key,
+                    owner_id=owner_id,
+                    created_at=now,
+                )
+            )
+        session.execute(
+            delete(ArtifactRow).where(
+                ArtifactRow.project_id == project_id,
+                ArtifactRow.owner_id == owner_id,
+            )
+        )
+        session.execute(
+            delete(JobRow).where(
+                JobRow.project_id == project_id,
+                JobRow.owner_id == owner_id,
+            )
+        )
+        session.execute(
+            delete(RevisionRow).where(
+                RevisionRow.project_id == project_id,
+                RevisionRow.owner_id == owner_id,
+            )
+        )
+        return object_keys
+
     def delete(self, owner_id: str, project_id: str, expected_revision: int) -> list[str]:
         lock = self._sqlite_write_lock if self.is_sqlite else nullcontext()
         with lock, self.sessions.begin() as session:
@@ -661,29 +715,12 @@ class ProjectRepository:
                         "currentRevision": row.revision,
                     },
                 )
-            artifact_keys = session.scalars(
-                select(ArtifactRow.object_key).where(
-                    ArtifactRow.project_id == project_id,
-                    ArtifactRow.owner_id == owner_id,
-                )
-            ).all()
-            session.execute(
-                delete(ArtifactRow).where(
-                    ArtifactRow.project_id == project_id,
-                    ArtifactRow.owner_id == owner_id,
-                )
-            )
-            session.execute(
-                delete(JobRow).where(
-                    JobRow.project_id == project_id,
-                    JobRow.owner_id == owner_id,
-                )
-            )
-            session.execute(
-                delete(RevisionRow).where(
-                    RevisionRow.project_id == project_id,
-                    RevisionRow.owner_id == owner_id,
-                )
+            object_keys = self._purge_project(
+                session,
+                project_id=project_id,
+                owner_id=owner_id,
+                source_key=row.source_key,
+                now=datetime.now(UTC),
             )
             result = cast(
                 CursorResult[Any],
@@ -700,16 +737,6 @@ class ProjectRepository:
                     "REVISION_CONFLICT",
                     "The project changed while deletion was being saved.",
                     status_code=409,
-                )
-            object_keys = [row.source_key, *artifact_keys]
-            now = datetime.now(UTC)
-            for object_key in object_keys:
-                session.merge(
-                    ObjectDeletionRow(
-                        object_key=object_key,
-                        owner_id=owner_id,
-                        created_at=now,
-                    )
                 )
             return object_keys
 
@@ -855,17 +882,7 @@ class ProjectRepository:
             )
             if row is None:
                 return None
-            return ArtifactRecord(
-                project_id=row.project_id,
-                revision=row.revision,
-                kind=row.kind,
-                owner_id=row.owner_id,
-                object_key=row.object_key,
-                sha256=row.sha256,
-                size=row.size,
-                media_type=row.media_type,
-                created_at=row.created_at,
-            )
+            return ArtifactRecord.from_row(row)
 
     def record_artifact(self, artifact: ArtifactRecord) -> ArtifactRecord:
         lock = self._sqlite_write_lock if self.is_sqlite else nullcontext()
@@ -894,34 +911,11 @@ class ProjectRepository:
             if existing is not None:
                 if existing.owner_id != artifact.owner_id:
                     raise _not_found()
-                return ArtifactRecord(
-                    project_id=existing.project_id,
-                    revision=existing.revision,
-                    kind=existing.kind,
-                    owner_id=existing.owner_id,
-                    object_key=existing.object_key,
-                    sha256=existing.sha256,
-                    size=existing.size,
-                    media_type=existing.media_type,
-                    created_at=existing.created_at,
-                )
-            source_bytes = (
-                session.scalar(
-                    select(func.coalesce(func.sum(ProjectRow.source_size), 0)).where(
-                        ProjectRow.owner_id == artifact.owner_id
-                    )
-                )
-                or 0
-            )
-            artifact_bytes = (
-                session.scalar(
-                    select(func.coalesce(func.sum(ArtifactRow.size), 0)).where(
-                        ArtifactRow.owner_id == artifact.owner_id
-                    )
-                )
-                or 0
-            )
-            if int(source_bytes) + int(artifact_bytes) + artifact.size > self.max_storage_bytes:
+                return ArtifactRecord.from_row(existing)
+            if (
+                self._stored_bytes(session, artifact.owner_id) + artifact.size
+                > self.max_storage_bytes
+            ):
                 raise InkError(
                     "STORAGE_QUOTA_EXCEEDED",
                     "This account reached its private storage allowance. "
@@ -983,37 +977,12 @@ class ProjectRepository:
             row = session.scalar(query)
             if row is None:
                 return []
-            artifact_keys = list(
-                session.scalars(
-                    select(ArtifactRow.object_key).where(
-                        ArtifactRow.project_id == project_id,
-                        ArtifactRow.owner_id == owner_id,
-                    )
-                ).all()
-            )
-            object_keys = [row.source_key, *artifact_keys]
-            for object_key in object_keys:
-                session.merge(
-                    ObjectDeletionRow(
-                        object_key=object_key,
-                        owner_id=owner_id,
-                        created_at=now,
-                    )
-                )
-            session.execute(
-                delete(ArtifactRow).where(
-                    ArtifactRow.project_id == project_id,
-                    ArtifactRow.owner_id == owner_id,
-                )
-            )
-            session.execute(
-                delete(JobRow).where(JobRow.project_id == project_id, JobRow.owner_id == owner_id)
-            )
-            session.execute(
-                delete(RevisionRow).where(
-                    RevisionRow.project_id == project_id,
-                    RevisionRow.owner_id == owner_id,
-                )
+            object_keys = self._purge_project(
+                session,
+                project_id=project_id,
+                owner_id=owner_id,
+                source_key=row.source_key,
+                now=now,
             )
             session.execute(
                 delete(ProjectRow)
