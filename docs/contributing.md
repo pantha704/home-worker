@@ -38,6 +38,13 @@ docker compose build
 docker compose up -d --wait
 ```
 
+The Dockerfiles use `RUN --mount=type=cache`, which needs BuildKit. Docker falls back to
+the legacy builder when the buildx plugin is absent, and that builder rejects `--mount`,
+so the image build fails — or worse, a `docker build … | tail` pipeline reports success
+while nothing was built. Check with `docker buildx version` before trusting a local image
+build; on Ubuntu install the official `docker-buildx` package. CI builds and scans both
+images with BuildKit, so a green `Container vulnerabilities` job is authoritative.
+
 If a script is not implemented yet, add it in the owning component rather than weakening CI. CI is the final source of exact commands.
 
 ## Change requirements
