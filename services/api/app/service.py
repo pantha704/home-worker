@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from .db import ProjectRepository
@@ -18,6 +19,7 @@ from .models import (
     Extractor,
     PageTextPatch,
     ProjectDocument,
+    ProjectError,
     ProjectStatus,
     SettingsPatch,
     SourceRegion,
@@ -31,6 +33,43 @@ def _next_revision(project: ProjectDocument) -> ProjectDocument:
     return project
 
 
+def _mutate(
+    repository: ProjectRepository,
+    owner_id: str,
+    project_id: str,
+    expected_revision: int,
+    apply: Callable[[ProjectDocument], ProjectDocument],
+    *,
+    job_lease: tuple[str, str] | None = None,
+) -> ProjectDocument:
+    """Edit a deep copy of the current revision and persist it as the next one."""
+
+    def transform(current: ProjectDocument) -> ProjectDocument:
+        return _next_revision(apply(current.model_copy(deep=True)))
+
+    return repository.mutate(
+        owner_id,
+        project_id,
+        expected_revision,
+        transform,
+        job_lease=job_lease,
+    )
+
+
+def _find_block(project: ProjectDocument, block_id: str) -> DocumentBlock:
+    block = next(
+        (item for page in project.pages for item in page.blocks if item.id == block_id),
+        None,
+    )
+    if block is None:
+        raise InkError(
+            "BLOCK_NOT_FOUND",
+            "No block with that ID exists in the project.",
+            status_code=404,
+        )
+    return block
+
+
 def patch_block(
     repository: ProjectRepository,
     owner_id: str,
@@ -38,22 +77,8 @@ def patch_block(
     block_id: str,
     patch: BlockPatch,
 ) -> ProjectDocument:
-    def transform(current: ProjectDocument) -> ProjectDocument:
-        updated = current.model_copy(deep=True)
-        target = None
-        for page in updated.pages:
-            for block in page.blocks:
-                if block.id == block_id:
-                    target = block
-                    break
-            if target:
-                break
-        if target is None:
-            raise InkError(
-                "BLOCK_NOT_FOUND",
-                "No block with that ID exists in the project.",
-                status_code=404,
-            )
+    def apply(updated: ProjectDocument) -> ProjectDocument:
+        target = _find_block(updated, block_id)
         target.text = patch.text
         target.confidence = 1.0
         target.reviewed = True
@@ -71,9 +96,9 @@ def patch_block(
             )
         )
         updated.status = ProjectStatus.NEEDS_REVIEW
-        return _next_revision(updated)
+        return updated
 
-    return repository.mutate(owner_id, project_id, patch.expected_revision, transform)
+    return _mutate(repository, owner_id, project_id, patch.expected_revision, apply)
 
 
 def review_block(
@@ -83,18 +108,8 @@ def review_block(
     block_id: str,
     request: BlockReviewRequest,
 ) -> ProjectDocument:
-    def transform(current: ProjectDocument) -> ProjectDocument:
-        updated = current.model_copy(deep=True)
-        target = next(
-            (block for page in updated.pages for block in page.blocks if block.id == block_id),
-            None,
-        )
-        if target is None:
-            raise InkError(
-                "BLOCK_NOT_FOUND",
-                "No block with that ID exists in the project.",
-                status_code=404,
-            )
+    def apply(updated: ProjectDocument) -> ProjectDocument:
+        target = _find_block(updated, block_id)
         if target.reviewed:
             raise InkError(
                 "BLOCK_ALREADY_REVIEWED",
@@ -110,9 +125,9 @@ def review_block(
             )
         )
         updated.status = ProjectStatus.NEEDS_REVIEW
-        return _next_revision(updated)
+        return updated
 
-    return repository.mutate(owner_id, project_id, request.expected_revision, transform)
+    return _mutate(repository, owner_id, project_id, request.expected_revision, apply)
 
 
 def patch_page_text(
@@ -122,8 +137,7 @@ def patch_page_text(
     page_number: int,
     patch: PageTextPatch,
 ) -> ProjectDocument:
-    def transform(current: ProjectDocument) -> ProjectDocument:
-        updated = current.model_copy(deep=True)
+    def apply(updated: ProjectDocument) -> ProjectDocument:
         target = next((page for page in updated.pages if page.number == page_number), None)
         if target is None:
             raise InkError(
@@ -156,9 +170,9 @@ def patch_page_text(
             for text in paragraphs
         ]
         updated.status = ProjectStatus.NEEDS_REVIEW
-        return _next_revision(updated)
+        return updated
 
-    return repository.mutate(owner_id, project_id, patch.expected_revision, transform)
+    return _mutate(repository, owner_id, project_id, patch.expected_revision, apply)
 
 
 def replace_extracted_pages(
@@ -170,8 +184,7 @@ def replace_extracted_pages(
 ) -> ProjectDocument:
     by_number = {page.number: page for page in replacements}
 
-    def transform(current: ProjectDocument) -> ProjectDocument:
-        updated = current.model_copy(deep=True)
+    def apply(updated: ProjectDocument) -> ProjectDocument:
         if updated.status == ProjectStatus.FAILED:
             raise InkError(
                 "INVALID_STATE_TRANSITION",
@@ -193,9 +206,9 @@ def replace_extracted_pages(
         ]
         updated.status = ProjectStatus.NEEDS_REVIEW
         updated.error = None
-        return _next_revision(updated)
+        return updated
 
-    return repository.mutate(owner_id, project_id, expected_revision, transform)
+    return _mutate(repository, owner_id, project_id, expected_revision, apply)
 
 
 def confirm_project(
@@ -204,8 +217,7 @@ def confirm_project(
     project_id: str,
     request: ConfirmRequest,
 ) -> ProjectDocument:
-    def transform(current: ProjectDocument) -> ProjectDocument:
-        updated = current.model_copy(deep=True)
+    def apply(updated: ProjectDocument) -> ProjectDocument:
         if updated.status == ProjectStatus.FAILED:
             raise InkError(
                 "INVALID_STATE_TRANSITION",
@@ -229,9 +241,9 @@ def confirm_project(
             for block in page.blocks:
                 block.reviewed = True
         updated.status = ProjectStatus.READY
-        return _next_revision(updated)
+        return updated
 
-    return repository.mutate(owner_id, project_id, request.expected_revision, transform)
+    return _mutate(repository, owner_id, project_id, request.expected_revision, apply)
 
 
 def patch_settings(
@@ -240,13 +252,12 @@ def patch_settings(
     project_id: str,
     patch: SettingsPatch,
 ) -> ProjectDocument:
-    def transform(current: ProjectDocument) -> ProjectDocument:
-        updated = current.model_copy(deep=True)
+    def apply(updated: ProjectDocument) -> ProjectDocument:
         values = patch.model_dump(exclude={"expected_revision"}, exclude_none=True, by_alias=False)
         updated.settings = updated.settings.model_copy(update=values)
-        return _next_revision(updated)
+        return updated
 
-    return repository.mutate(owner_id, project_id, patch.expected_revision, transform)
+    return _mutate(repository, owner_id, project_id, patch.expected_revision, apply)
 
 
 def complete_processing(
@@ -258,24 +269,24 @@ def complete_processing(
     *,
     job_lease: tuple[str, str] | None = None,
 ) -> ProjectDocument:
-    def transform(current: ProjectDocument) -> ProjectDocument:
-        if current.status != ProjectStatus.PROCESSING:
+    def apply(updated: ProjectDocument) -> ProjectDocument:
+        if updated.status != ProjectStatus.PROCESSING:
             raise InkError(
                 "INVALID_STATE_TRANSITION",
                 "Only a processing project can receive extracted pages.",
                 status_code=409,
             )
-        updated = current.model_copy(deep=True)
         updated.pages = [page.model_copy(deep=True) for page in pages]
         updated.status = ProjectStatus.NEEDS_REVIEW
         updated.error = None
-        return _next_revision(updated)
+        return updated
 
-    return repository.mutate(
+    return _mutate(
+        repository,
         owner_id,
         project_id,
         expected_revision,
-        transform,
+        apply,
         job_lease=job_lease,
     )
 
@@ -288,12 +299,9 @@ def fail_processing(
     code: str,
     message: str,
 ) -> ProjectDocument:
-    from .models import ProjectError
-
-    def transform(current: ProjectDocument) -> ProjectDocument:
-        updated = current.model_copy(deep=True)
+    def apply(updated: ProjectDocument) -> ProjectDocument:
         updated.status = ProjectStatus.FAILED
         updated.error = ProjectError(code=code, message=message)
-        return _next_revision(updated)
+        return updated
 
-    return repository.mutate(owner_id, project_id, expected_revision, transform)
+    return _mutate(repository, owner_id, project_id, expected_revision, apply)
