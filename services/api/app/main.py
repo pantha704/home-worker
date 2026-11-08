@@ -260,7 +260,7 @@ def create_app(
 
     application = FastAPI(
         title="Homeworker API",
-        version="0.2.0",
+        version="0.2.2",
         summary="Faithful document review and deterministic A4 handwriting",
         lifespan=lifespan,
     )
