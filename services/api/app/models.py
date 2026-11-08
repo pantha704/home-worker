@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import (
     AfterValidator,
@@ -38,6 +38,10 @@ class ProjectStatus(StrEnum):
     NEEDS_REVIEW = "needs_review"
     READY = "ready"
     FAILED = "failed"
+
+
+MimeType = Literal["application/pdf", "image/png", "image/jpeg"]
+SUPPORTED_MIME_TYPES: frozenset[MimeType] = frozenset(get_args(MimeType))
 
 
 class BlockKind(StrEnum):
@@ -131,7 +135,7 @@ class ProjectError(ApiModel):
 class ProjectDocument(ApiModel):
     id: str
     filename: str = Field(min_length=1)
-    mime_type: Literal["application/pdf", "image/png", "image/jpeg"]
+    mime_type: MimeType
     sha256: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
     status: ProjectStatus
     revision: int = Field(ge=1)

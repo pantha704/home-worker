@@ -1,17 +1,18 @@
+import { isSupportedMimeType, MAX_ARCHIVE_BYTES, MAX_UPLOAD_BYTES, type MimeType } from "@homeworker/contracts";
+
 import { sniffSource } from "@/lib/local-engine";
-import { MAX_ARCHIVE_BYTES, MAX_UPLOAD_BYTES } from "@/lib/validation";
 
 export interface LocalObjectStore {
   put(digest: string, bytes: Uint8Array): Promise<void>;
   get(digest: string): Promise<Uint8Array>;
-  list?(): Promise<string[]>;
-  delete?(digest: string): Promise<void>;
+  list(): Promise<string[]>;
+  delete(digest: string): Promise<void>;
 }
 
 interface ProjectRow {
   id: string;
   filename: string;
-  mimeType: "application/pdf" | "image/png" | "image/jpeg";
+  mimeType: MimeType;
   sourceDigest: string;
   currentRevision: number;
   createdAt: string;
@@ -29,7 +30,7 @@ interface RevisionRow {
 export interface LocalProject {
   id: string;
   filename: string;
-  mimeType: "application/pdf" | "image/png" | "image/jpeg";
+  mimeType: MimeType;
   revision: number;
   text: string;
   createdAt: string;
@@ -38,7 +39,7 @@ export interface LocalProject {
 
 interface CreateInput {
   filename: string;
-  mimeType: "application/pdf" | "image/png" | "image/jpeg";
+  mimeType: MimeType;
   source: Uint8Array;
   text: string;
   exportPdf: Uint8Array;
@@ -231,7 +232,7 @@ export class LocalProjectRepository {
     }
     const project = value.project;
     const mimeType = project?.mimeType;
-    if (!project || (mimeType !== "application/pdf" && mimeType !== "image/png" && mimeType !== "image/jpeg")) {
+    if (!project || !isSupportedMimeType(mimeType)) {
       throw new Error("Unsupported Homeworker archive");
     }
     if (typeof project.filename !== "string" || project.filename.length === 0 || project.filename.length > MAX_FILENAME_CHARS) {
@@ -286,7 +287,6 @@ export class LocalProjectRepository {
   }
 
   async sweepOrphans(): Promise<number> {
-    if (!this.objects.list || !this.objects.delete) return 0;
     const database = await this.database();
     const transaction = database.transaction(["projects", "revisions"], "readonly");
     const projects = await request(transaction.objectStore("projects").getAll()) as ProjectRow[];
