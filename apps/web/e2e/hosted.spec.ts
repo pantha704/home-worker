@@ -181,5 +181,20 @@ test.describe("hosted stack", () => {
     expect(apiResponses.filter((response) => response.status >= 400)).toEqual([]);
     expect(failedApiRequests).toEqual([]);
     expect(consoleErrors.filter((text) => /CORS|Access-Control|blocked by/i.test(text))).toEqual([]);
+
+    // Every run creates a real project, and the API caps an owner at 20, so a
+    // nightly cadence would eventually make this suite fail on quota rather than
+    // on a regression. Delete it through the same tested endpoint the app uses
+    // (expectedRevision guards the write), and fail loudly if the cleanup fails.
+    const token = requiredAccessToken();
+    const projectUrl = `${API_URL}/v1/projects/${projectId}`;
+    const lookup = await fetch(projectUrl, { headers: { Authorization: `Bearer ${token}` } });
+    expect(lookup.status, "cleanup needs the project revision").toBe(200);
+    const { revision } = (await lookup.json()) as { revision: number };
+    const removed = await fetch(`${projectUrl}?expectedRevision=${revision}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}`, "X-Homeworker-Client": "web", Origin: BASE_URL },
+    });
+    expect(removed.status, "the hosted e2e project must be deleted after the run").toBe(204);
   });
 });
