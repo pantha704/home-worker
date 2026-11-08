@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { isSupportedMimeType } from "@homeworker/contracts";
+
 import { AuthPanel } from "@/components/auth-panel";
 import { FileIcon, UploadIcon, WarningIcon } from "@/components/icons";
 import { useAuth } from "@/components/auth-provider";
@@ -13,7 +15,6 @@ import { rememberProject } from "@/lib/recent-projects";
 import {
   formatFileSize,
   HOSTED_MAX_UPLOAD_BYTES,
-  MAX_ARCHIVE_BYTES,
   MAX_UPLOAD_BYTES,
   validateUpload,
 } from "@/lib/validation";
@@ -36,7 +37,7 @@ export function UploadDropzone() {
 
   function selectFile(file: File | undefined) {
     if (!file) return;
-    if (browserPreview && file.type !== "application/pdf" && file.type !== "image/png" && file.type !== "image/jpeg") {
+    if (browserPreview && !isSupportedMimeType(file.type)) {
       setSelectedFile(null);
       setMessage("Browser-local processing supports PDF, PNG, and JPEG. Scanned PDFs are limited to 10 OCR pages.");
       setState("error");
@@ -109,11 +110,6 @@ export function UploadDropzone() {
 
   async function restoreArchive(file: File | undefined) {
     if (!file) return;
-    if (file.size > MAX_ARCHIVE_BYTES) {
-      setMessage("This backup is larger than the local restore limit.");
-      setState("error");
-      return;
-    }
     setState("uploading");
     setMessage("Verifying and restoring the local backup…");
     try {

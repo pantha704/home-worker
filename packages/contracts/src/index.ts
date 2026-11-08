@@ -1,3 +1,15 @@
+export const SUPPORTED_MIME_TYPES = ["application/pdf", "image/png", "image/jpeg"] as const;
+
+export type MimeType = (typeof SUPPORTED_MIME_TYPES)[number];
+
+export function isSupportedMimeType(value: string | null | undefined): value is MimeType {
+  return typeof value === "string" && (SUPPORTED_MIME_TYPES as readonly string[]).includes(value);
+}
+
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const HOSTED_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_ARCHIVE_BYTES = 80 * 1024 * 1024;
+
 export type ProjectStatus =
   | "processing"
   | "needs_review"
@@ -67,7 +79,7 @@ export interface RenderSettings {
 export interface ProjectDocument {
   id: string;
   filename: string;
-  mimeType: string;
+  mimeType: MimeType;
   sha256: string;
   status: ProjectStatus;
   revision: number;

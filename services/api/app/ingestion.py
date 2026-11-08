@@ -16,8 +16,8 @@ from PIL import Image, UnidentifiedImageError
 
 from .config import Settings
 from .errors import InkError
+from .models import SUPPORTED_MIME_TYPES
 
-ALLOWED_MIME_TYPES = frozenset({"application/pdf", "image/png", "image/jpeg"})
 EXTENSIONS = {"application/pdf": ".pdf", "image/png": ".png", "image/jpeg": ".jpg"}
 CHUNK_SIZE = 1024 * 1024
 ACTIVE_ACTION_TYPES = frozenset(
@@ -63,12 +63,12 @@ def sniff_mime(header: bytes) -> str | None:
 
 async def store_upload(upload: UploadFile, settings: Settings) -> StoredUpload:
     declared = (upload.content_type or "").lower().split(";", maxsplit=1)[0].strip()
-    if declared not in ALLOWED_MIME_TYPES:
+    if declared not in SUPPORTED_MIME_TYPES:
         raise InkError(
             "UNSUPPORTED_MEDIA_TYPE",
             "Upload a PDF, PNG, or JPEG file.",
             status_code=415,
-            details={"received": declared or None, "allowed": sorted(ALLOWED_MIME_TYPES)},
+            details={"received": declared or None, "allowed": sorted(SUPPORTED_MIME_TYPES)},
         )
 
     incoming = settings.work_root / ".incoming"

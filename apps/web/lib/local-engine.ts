@@ -2,12 +2,14 @@ import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 
+import type { MimeType } from "@homeworker/contracts";
+
 GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/legacy/build/pdf.worker.mjs",
   import.meta.url,
 ).toString();
 
-export type LocalSourceType = "application/pdf" | "image/png" | "image/jpeg";
+export type LocalSourceType = MimeType;
 
 export function sniffSource(bytes: Uint8Array): LocalSourceType {
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47

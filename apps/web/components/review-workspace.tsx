@@ -27,10 +27,11 @@ import {
 import { flattenBlocks, pagePlainText } from "@/lib/project";
 import { forgetProject, rememberProject } from "@/lib/recent-projects";
 
+// Placeholder cards shown only until /v1/personas responds; descriptions and licences are API-owned.
 const FALLBACK_PERSONAS: Persona[] = [
-  { id: "scholar", name: "Scholar", description: "Thoughtful and steady", license: "SIL Open Font License 1.1" },
-  { id: "casual", name: "Casual", description: "Loose and lively", license: "SIL Open Font License 1.1" },
-  { id: "compact", name: "Compact", description: "Clear and space-efficient", license: "SIL Open Font License 1.1" },
+  { id: "scholar", name: "Scholar", description: "", license: "" },
+  { id: "casual", name: "Casual", description: "", license: "" },
+  { id: "compact", name: "Compact", description: "", license: "" },
 ];
 
 export function ReviewWorkspace({ projectId }: { projectId: string }) {
@@ -46,7 +47,6 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
   const [pageIndex, setPageIndex] = useState(0);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set());
-  const [stage, setStage] = useState<"review" | "finalize">("review");
   const [refreshingPage, setRefreshingPage] = useState<number | null>(null);
 
   useEffect(() => {
@@ -68,7 +68,6 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
         if (nextProject.status === "processing") {
           pollTimer = setTimeout(load, 1_500);
         }
-        if (nextProject.status === "ready") setStage("finalize");
       } catch (error) {
         if (!active || controller.signal.aborted) return;
         const message = error instanceof HomeworkerApiError
@@ -99,27 +98,12 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
   const pages = project?.pages ?? [];
   const currentPage = pages[pageIndex] ?? pages[0];
   const draftText = currentPage ? (drafts[currentPage.number] ?? pagePlainText(currentPage)) : "";
+  const isReady = project?.status === "ready";
+  const stage: "review" | "finalize" = isReady ? "finalize" : "review";
+  const refreshing = refreshingPage !== null;
   const pendingReviewBlocks = flattenBlocks(pages).filter(
     (block) => !block.reviewed && (block.confidence < 0.9 || block.warnings.length > 0),
   );
-
-  async function approveBlock(blockId: string) {
-    if (!project) return;
-    setBusyAction(`block:${blockId}`);
-    setMutationError(null);
-    try {
-      const next = await reviewBlock(project.id, blockId, project.revision);
-      setProject(next);
-    } catch (error) {
-      if (isConflictError(error)) {
-        await recoverConflict("The document changed. Review this block again.");
-      } else {
-        setMutationError(error instanceof HomeworkerApiError ? error.message : "The block review could not be saved.");
-      }
-    } finally {
-      setBusyAction(null);
-    }
-  }
 
   async function recoverConflict(message: string) {
     try {
@@ -132,143 +116,149 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
     }
   }
 
-  async function saveCurrentPage() {
-    if (!project || !currentPage || busyAction !== null) return null;
-    setBusyAction(`page:${currentPage.number}`);
+  async function runMutation<T>(
+    busyKey: string,
+    failureMessage: string,
+    operation: () => Promise<T>,
+    options: { conflictMessage?: string; onSettled?: () => void } = {},
+  ): Promise<T | null> {
+    setBusyAction(busyKey);
     setMutationError(null);
     try {
-      const next = await updatePageText(project.id, currentPage.number, draftText, project.revision);
-      setProject(next);
-      setDrafts((current) => {
-        const copy = { ...current };
-        delete copy[currentPage.number];
-        return copy;
-      });
-      return next;
+      return await operation();
     } catch (error) {
-      if (isConflictError(error)) {
-        await recoverConflict("A newer revision was loaded. Check this page and save again.");
+      if (options.conflictMessage !== undefined && isConflictError(error)) {
+        await recoverConflict(options.conflictMessage);
       } else {
-        setMutationError(error instanceof HomeworkerApiError ? error.message : "The page could not be saved.");
+        setMutationError(error instanceof HomeworkerApiError ? error.message : failureMessage);
       }
       return null;
     } finally {
       setBusyAction(null);
+      options.onSettled?.();
     }
+  }
+
+  async function approveBlock(blockId: string) {
+    if (!project) return;
+    await runMutation(
+      `block:${blockId}`,
+      "The block review could not be saved.",
+      async () => {
+        setProject(await reviewBlock(project.id, blockId, project.revision));
+      },
+      { conflictMessage: "The document changed. Review this block again." },
+    );
+  }
+
+  async function saveCurrentPage() {
+    if (!project || !currentPage || busyAction !== null) return null;
+    return runMutation(
+      `page:${currentPage.number}`,
+      "The page could not be saved.",
+      async () => {
+        const next = await updatePageText(project.id, currentPage.number, draftText, project.revision);
+        setProject(next);
+        setDrafts((current) => {
+          const copy = { ...current };
+          delete copy[currentPage.number];
+          return copy;
+        });
+        return next;
+      },
+      { conflictMessage: "A newer revision was loaded. Check this page and save again." },
+    );
   }
 
   async function retrySelected() {
     if (!project || selectedPages.size === 0) return;
     const numbers = [...selectedPages].sort((a, b) => a - b);
-    setBusyAction("retry");
-    setMutationError(null);
     setRefreshingPage(numbers[0] ?? null);
-    try {
-      let revision = project.revision;
-      let latest = project;
-      for (const number of numbers) {
-        setRefreshingPage(number);
-        latest = await retryPages(latest.id, [number], revision, { forceOcr: true });
-        revision = latest.revision;
-      }
-      setProject(latest);
-      setSelectedPages(new Set());
-      setDrafts({});
-    } catch (error) {
-      if (isConflictError(error)) {
-        await recoverConflict("The document changed. Re-select pages to retry.");
-      } else {
-        setMutationError(error instanceof HomeworkerApiError ? error.message : "Those pages could not be re-extracted.");
-      }
-    } finally {
-      setBusyAction(null);
-      setRefreshingPage(null);
-    }
+    await runMutation(
+      "retry",
+      "Those pages could not be re-extracted.",
+      async () => {
+        let revision = project.revision;
+        let latest = project;
+        for (const number of numbers) {
+          setRefreshingPage(number);
+          latest = await retryPages(latest.id, [number], revision, { forceOcr: true });
+          revision = latest.revision;
+        }
+        setProject(latest);
+        setSelectedPages(new Set());
+        setDrafts({});
+      },
+      {
+        conflictMessage: "The document changed. Re-select pages to retry.",
+        onSettled: () => setRefreshingPage(null),
+      },
+    );
   }
 
   async function applySettings(settings: RenderSettings) {
     if (!project) return;
-    setBusyAction("settings");
-    setMutationError(null);
-    try {
-      const next = await updateProjectSettings(project.id, settings, project.revision);
-      setProject(next);
-    } catch (error) {
-      if (isConflictError(error)) {
-        await recoverConflict("A newer revision was loaded. Reapply your page settings.");
-      } else {
-        setMutationError(error instanceof HomeworkerApiError ? error.message : "Page settings could not be applied.");
-      }
-    } finally {
-      setBusyAction(null);
-    }
+    await runMutation(
+      "settings",
+      "Page settings could not be applied.",
+      async () => {
+        setProject(await updateProjectSettings(project.id, settings, project.revision));
+      },
+      { conflictMessage: "A newer revision was loaded. Reapply your page settings." },
+    );
   }
 
   async function submitReview() {
     if (!project || busyAction !== null) return;
-    setBusyAction("confirm");
-    setMutationError(null);
-    try {
-      let revision = project.revision;
-      let latest = project;
-      const dirtyPages = pages.filter((page) => (drafts[page.number] ?? pagePlainText(page)) !== pagePlainText(page));
-      for (const page of dirtyPages) {
-        latest = await updatePageText(latest.id, page.number, drafts[page.number] ?? pagePlainText(page), revision);
-        revision = latest.revision;
-        setProject(latest);
-        setDrafts((current) => {
-          const copy = { ...current };
-          delete copy[page.number];
-          return copy;
-        });
-      }
-      const next = await confirmProject(latest.id, revision);
-      setProject(next);
-      setStage("finalize");
-    } catch (error) {
-      if (isConflictError(error)) {
-        await recoverConflict("The document changed during review. Recheck pages before submitting.");
-      } else {
-        setMutationError(error instanceof HomeworkerApiError ? error.message : "The review could not be submitted.");
-      }
-    } finally {
-      setBusyAction(null);
-    }
+    await runMutation(
+      "confirm",
+      "The review could not be submitted.",
+      async () => {
+        let revision = project.revision;
+        let latest = project;
+        const dirtyPages = pages.filter((page) => (drafts[page.number] ?? pagePlainText(page)) !== pagePlainText(page));
+        for (const page of dirtyPages) {
+          latest = await updatePageText(latest.id, page.number, drafts[page.number] ?? pagePlainText(page), revision);
+          revision = latest.revision;
+          setProject(latest);
+          setDrafts((current) => {
+            const copy = { ...current };
+            delete copy[page.number];
+            return copy;
+          });
+        }
+        setProject(await confirmProject(latest.id, revision));
+      },
+      { conflictMessage: "The document changed during review. Recheck pages before submitting." },
+    );
   }
 
   async function removeProject() {
     if (!project) return;
     const confirmed = window.confirm(`Delete “${project.filename}” and its ${hosted ? "private stored source" : "local source file"}? This cannot be undone.`);
     if (!confirmed) return;
-    setBusyAction("delete");
-    setMutationError(null);
-    try {
-      await deleteProject(project.id, project.revision);
-      forgetProject(project.id);
-      router.push("/");
-      router.refresh();
-    } catch (error) {
-      if (isConflictError(error)) {
-        await recoverConflict("The project changed before deletion. Review the latest revision, then delete again.");
-      } else {
-        setMutationError(error instanceof HomeworkerApiError ? error.message : "The local project could not be deleted.");
-      }
-    } finally {
-      setBusyAction(null);
-    }
+    await runMutation(
+      "delete",
+      "The local project could not be deleted.",
+      async () => {
+        await deleteProject(project.id, project.revision);
+        forgetProject(project.id);
+        router.push("/");
+        router.refresh();
+      },
+      { conflictMessage: "The project changed before deletion. Review the latest revision, then delete again." },
+    );
   }
 
   async function downloadHandwritten() {
-    if (!project || project.status !== "ready") return;
-    setBusyAction("download:handwritten");
-    setMutationError(null);
-    try {
-      saveBlob(await fetchArtifact(project.id, project.revision, "handwritten_pdf"));
-    } catch (error) {
-      setMutationError(error instanceof HomeworkerApiError ? error.message : "The export could not be prepared.");
-    } finally {
-      setBusyAction(null);
-    }
+    if (!project || !isReady) return;
+    await runMutation(
+      "download:handwritten",
+      "The export could not be prepared.",
+      async () => {
+        saveBlob(await fetchArtifact(project.id, project.revision, "handwritten_pdf"));
+      },
+    );
   }
 
   if (authLoading) {
@@ -303,14 +293,13 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
     );
   }
 
-  const exportReady = project.status === "ready";
   return (
     <main className="project-app">
       <ProjectToolbar
         downloading={busyAction === "download:handwritten"}
         filename={project.filename}
         onExport={() => void downloadHandwritten()}
-        previewReady={exportReady}
+        previewReady={isReady}
         revision={project.revision}
         status={project.status}
       />
@@ -351,7 +340,7 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
             page={currentPage}
             pageCount={pages.length}
             projectId={project.id}
-            refreshing={busyAction === "retry"}
+            refreshing={refreshing}
             reviewingBlockId={busyAction?.startsWith("block:") ? busyAction.slice(6) : null}
             selected={selectedPages.has(currentPage.number)}
           />
@@ -361,8 +350,8 @@ export function ReviewWorkspace({ projectId }: { projectId: string }) {
                 ? "All uncertain blocks reviewed"
                 : `${pendingReviewBlocks.length} uncertain block${pendingReviewBlocks.length === 1 ? "" : "s"} remaining`}
             </span>
-            <button className="button button-secondary" disabled={selectedPages.size === 0 || busyAction === "retry"} onClick={() => void retrySelected()} type="button">
-              {busyAction === "retry" ? "Re-extracting…" : `Retry ${selectedPages.size || ""} selected page${selectedPages.size === 1 ? "" : "s"}`}
+            <button className="button button-secondary" disabled={selectedPages.size === 0 || refreshing} onClick={() => void retrySelected()} type="button">
+              {refreshing ? "Re-extracting…" : `Retry ${selectedPages.size || ""} selected page${selectedPages.size === 1 ? "" : "s"}`}
             </button>
             <button className="button button-primary" disabled={busyAction !== null || pages.length === 0 || pendingReviewBlocks.length > 0} onClick={() => void submitReview()} type="button">
               {busyAction === "confirm" ? <><span className="spinner" /> Submitting…</> : <><CheckIcon size={17} /> Submit for handwriting</>}

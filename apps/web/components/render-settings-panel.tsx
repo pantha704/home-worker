@@ -22,12 +22,6 @@ const INK_COLORS = [
   { name: "Burgundy", value: "#7B2828" },
 ];
 
-const PERSONA_SAMPLE: Record<Persona["id"], string> = {
-  scholar: "Thoughtful & steady",
-  casual: "Loose and lively",
-  compact: "Clear & compact",
-};
-
 export function RenderSettingsPanel({ busy, deleting, personas, settings, onApply, onDelete }: RenderSettingsPanelProps) {
   const [draft, setDraft] = useState(settings);
 
@@ -66,7 +60,7 @@ export function RenderSettingsPanel({ busy, deleting, personas, settings, onAppl
               <span className="persona-check" />
               <span className="persona-sample">Aa</span>
               <strong>{persona.name}</strong>
-              <small>{PERSONA_SAMPLE[persona.id]}</small>
+              {persona.description ? <small>{persona.description}</small> : null}
             </label>
           ))}
         </div>

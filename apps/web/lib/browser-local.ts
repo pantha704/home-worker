@@ -1,3 +1,5 @@
+import type { MimeType } from "@homeworker/contracts";
+
 import { LocalProjectRepository, sha256, type LocalObjectStore, type LocalProject } from "@/lib/local-store";
 import { extractTextPages, sniffSource } from "@/lib/local-engine";
 import { MAX_ARCHIVE_BYTES, MAX_UPLOAD_BYTES } from "@/lib/validation";
@@ -60,7 +62,7 @@ export function validateLocalPdfSource(source: Uint8Array): void {
   if (!/^\s*%PDF-\d\.\d/.test(header)) throw new Error("This file is not a valid PDF.");
 }
 
-export function validateLocalSource(source: Uint8Array): "application/pdf" | "image/png" | "image/jpeg" {
+export function validateLocalSource(source: Uint8Array): MimeType {
   if (source.length > MAX_UPLOAD_BYTES) throw new Error("This file is larger than the 25 MB local limit.");
   return sniffSource(source);
 }

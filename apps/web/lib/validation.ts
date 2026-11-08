@@ -1,14 +1,13 @@
-const SUPPORTED_TYPES = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-]);
+import {
+  HOSTED_MAX_UPLOAD_BYTES,
+  MAX_ARCHIVE_BYTES,
+  MAX_UPLOAD_BYTES,
+  isSupportedMimeType,
+} from "@homeworker/contracts";
+
+export { HOSTED_MAX_UPLOAD_BYTES, MAX_ARCHIVE_BYTES, MAX_UPLOAD_BYTES };
 
 const SUPPORTED_EXTENSIONS = new Set(["pdf", "png", "jpg", "jpeg"]);
-
-export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-export const HOSTED_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-export const MAX_ARCHIVE_BYTES = 80 * 1024 * 1024;
 
 export interface FileValidationResult {
   valid: boolean;
@@ -21,7 +20,7 @@ export function validateUpload(
 ): FileValidationResult {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
 
-  if (!SUPPORTED_TYPES.has(file.type) || !SUPPORTED_EXTENSIONS.has(extension)) {
+  if (!isSupportedMimeType(file.type) || !SUPPORTED_EXTENSIONS.has(extension)) {
     return {
       valid: false,
       message: "Choose a PDF, PNG, JPG, or JPEG file.",
