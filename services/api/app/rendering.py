@@ -94,12 +94,22 @@ def personas() -> list[Persona]:
 
 
 def _font_asset_path(filename: str) -> Path:
+    """Resolve a persona font in both the source checkout and the container layout.
+
+    The candidates must be built lazily: a container checkout sits at /app/app, so
+    Path.parents[3] raises IndexError before the container candidate is tried.
+    """
     module = Path(__file__).resolve()
-    candidates = (
-        module.parents[3] / "assets" / "fonts" / filename,  # source checkout
-        module.parents[1] / "assets" / "fonts" / filename,  # container wheel layout
+    parents = module.parents
+    candidates: list[Path] = []
+    if len(parents) > 3:
+        candidates.append(parents[3] / "assets" / "fonts" / filename)  # source checkout
+    if len(parents) > 1:
+        candidates.append(parents[1] / "assets" / "fonts" / filename)  # container layout
+    found = next((candidate for candidate in candidates if candidate.is_file()), None)
+    return found or (
+        candidates[-1] if candidates else module.parent / "assets" / "fonts" / filename
     )
-    return next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
 
 
 def _fallback_font_path(italic: bool = False) -> Path:
