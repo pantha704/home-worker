@@ -1,0 +1,142 @@
+name: Hosted end-to-end
+
+# Exercises the deployed app in a real browser: authenticated upload, the CORS
+# preflight only a browser performs, and the storage/queue round trip. This is
+# the path the offline Playwright suite cannot cover.
+#
+# Required repository secrets:
+#   SUPABASE_URL                           https://<project-ref>.supabase.co
+#   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY   sb_publishable_… (sent as the token endpoint's apikey)
+#   SUPABASE_CI_TEST_EMAIL                 dedicated, email-confirmed test account
+#   SUPABASE_CI_TEST_PASSWORD              that account's password
+# The account is created out of band; this workflow never signs it up and never
+# uses magic links, so a limited free-tier mailbox cannot make the job flaky.
+
+on:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  FORCE_COLOR: "1"
+  HOSTED_E2E: "1"
+
+jobs:
+  hosted-e2e:
+    name: Hosted end-to-end (live stack)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 11.18.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Require hosted test secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_CI_TEST_EMAIL: ${{ secrets.SUPABASE_CI_TEST_EMAIL }}
+          SUPABASE_CI_TEST_PASSWORD: ${{ secrets.SUPABASE_CI_TEST_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY SUPABASE_CI_TEST_EMAIL SUPABASE_CI_TEST_PASSWORD; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required repository secret(s): ${missing[*]}"
+            echo "::error::Add them under Settings > Secrets and variables > Actions, then re-run this job."
+            exit 1
+          fi
+
+      - name: Mint a Supabase session without email
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_CI_TEST_EMAIL: ${{ secrets.SUPABASE_CI_TEST_EMAIL }}
+          SUPABASE_CI_TEST_PASSWORD: ${{ secrets.SUPABASE_CI_TEST_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          SUPABASE_URL="${SUPABASE_URL%/}"
+          payload="$RUNNER_TEMP/supabase-password-grant.json"
+          session="$RUNNER_TEMP/supabase-session.json"
+          jq -n '{email: env.SUPABASE_CI_TEST_EMAIL, password: env.SUPABASE_CI_TEST_PASSWORD}' > "$payload"
+          status=$(curl --silent --show-error --output "$session" --write-out '%{http_code}' \
+            --request POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+            --header "apikey: $NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
+            --header "Content-Type: application/json" \
+            --data-binary "@$payload")
+          rm -f "$payload"
+          if [ "$status" != "200" ]; then
+            reason=$(jq -r '.error_code // .error_description // .msg // "unknown error"' "$session" 2>/dev/null || echo "unreadable response")
+            rm -f "$session"
+            echo "::error::Supabase password grant returned HTTP $status: $reason"
+            echo "::error::Verify SUPABASE_CI_TEST_EMAIL / SUPABASE_CI_TEST_PASSWORD (email-confirmed test user) and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY."
+            exit 1
+          fi
+          token=$(jq -r '.access_token // empty' "$session")
+          rm -f "$session"
+          if [ -z "$token" ]; then
+            echo "::error::Supabase token response did not include an access_token."
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          printf 'SUPABASE_ACCESS_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+
+      - name: Install Playwright Chromium
+        working-directory: apps/web
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Warm the free-tier API
+        env:
+          HOSTED_API_URL: ${{ vars.HOSTED_API_URL || 'https://homeworker-api.onrender.com' }}
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail --retry 6 --retry-all-errors --retry-delay 5 \
+            --max-time 180 "$HOSTED_API_URL/health"
+
+      - name: Run the hosted spec in a real browser
+        working-directory: apps/web
+        env:
+          HOSTED_E2E: "1"
+          HOSTED_API_URL: ${{ vars.HOSTED_API_URL || 'https://homeworker-api.onrender.com' }}
+          HOSTED_BASE_URL: ${{ vars.HOSTED_BASE_URL || 'https://homeworker-43k.pages.dev' }}
+        run: pnpm exec playwright test e2e/hosted.spec.ts --project=chromium
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: hosted-e2e-failure-${{ github.run_attempt }}
+          path: |
+            apps/web/test-results/**
+            apps/web/playwright-report/**
+          if-no-files-found: warn
+          retention-days: 7
