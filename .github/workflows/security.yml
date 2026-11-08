@@ -52,7 +52,7 @@ jobs:
 
       - name: Audit locked Python dependencies
         run: |
-          uv export --project services/api --frozen --no-dev --no-emit-project --format requirements-txt --output-file /tmp/homeworker-requirements.txt
+          uv export --project services/api --frozen --no-dev --no-emit-project --no-hashes --format requirements-txt --output-file /tmp/homeworker-requirements.txt
           uvx --from pip-audit==2.10.1 pip-audit --strict --requirement /tmp/homeworker-requirements.txt
 
       - name: Set up pnpm
