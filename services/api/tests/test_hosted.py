@@ -338,3 +338,36 @@ def test_expiry_hides_project_before_retryable_object_cleanup(tmp_path) -> None:
 
         cleanup_expired(repository, object_store)
         assert repository.pending_object_deletions() == []
+
+
+def test_cors_preflight_allows_every_header_the_browser_sends(tmp_path) -> None:
+    """The web client sends Idempotency-Key on create; a missing allow-list entry
+    fails the preflight and breaks uploads for real browsers only."""
+    settings = hosted_settings(tmp_path)
+    requested = "authorization,content-type,idempotency-key,x-homeworker-client,x-request-id"
+    with TestClient(create_app(settings, token_verifier=StaticTokenVerifier())) as client:
+        response = client.options(
+            "/v1/projects",
+            headers={
+                "Origin": SITE_ORIGIN,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": requested,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == SITE_ORIGIN
+    allowed = response.headers["access-control-allow-headers"].lower()
+    for header in requested.split(","):
+        assert header in allowed, header
+    assert (
+        client.post(
+            "/v1/projects",
+            headers={
+                **headers(mutation=True),
+                "Idempotency-Key": "abc",
+                "Content-Type": "multipart/form-data",
+            },
+        ).status_code
+        != 403
+    )
