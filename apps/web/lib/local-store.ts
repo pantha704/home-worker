@@ -78,21 +78,8 @@ function decode(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
 }
 
-export const EXTRACTION_VERSION = 1;
-export const CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_ARCHIVE_TEXT_CHARS = 1_000_000;
 export const MAX_FILENAME_CHARS = 255;
-
-export interface LocalCheckpoint {
-  digest: string;
-  filename: string;
-  mimeType: "application/pdf" | "image/png" | "image/jpeg";
-  pages: string[];
-  total: number;
-  text?: string;
-  extractionVersion?: number;
-  updatedAt: string;
-}
 
 export class LocalProjectRepository {
   private readonly inflight = new Set<string>();
@@ -105,7 +92,6 @@ export class LocalProjectRepository {
       const database = opening.result;
       if (!database.objectStoreNames.contains("projects")) database.createObjectStore("projects", { keyPath: "id" });
       if (!database.objectStoreNames.contains("revisions")) database.createObjectStore("revisions", { keyPath: "key" });
-      if (!database.objectStoreNames.contains("checkpoints")) database.createObjectStore("checkpoints", { keyPath: "digest" });
     };
     return request(opening);
   }
@@ -280,7 +266,7 @@ export class LocalProjectRepository {
 
   async delete(id: string): Promise<void> {
     const database = await this.database();
-    const transaction = database.transaction(["projects", "revisions", "checkpoints"], "readwrite");
+    const transaction = database.transaction(["projects", "revisions"], "readwrite");
     const project = (await request(transaction.objectStore("projects").get(id))) as ProjectRow | undefined;
     if (!project) {
       transaction.abort();
@@ -294,44 +280,9 @@ export class LocalProjectRepository {
       }
     }
     transaction.objectStore("projects").delete(id);
-    transaction.objectStore("checkpoints").delete(project.sourceDigest);
     await complete(transaction);
     database.close();
     await this.sweepOrphans();
-  }
-
-  async getCheckpoint(digest: string): Promise<LocalCheckpoint | undefined> {
-    const database = await this.database();
-    const transaction = database.transaction("checkpoints", "readonly");
-    const value = await request(transaction.objectStore("checkpoints").get(digest)) as LocalCheckpoint | undefined;
-    await complete(transaction);
-    database.close();
-    if (!value) return undefined;
-    const age = Date.now() - Date.parse(value.updatedAt);
-    if (value.extractionVersion !== EXTRACTION_VERSION || !Number.isFinite(age) || age > CHECKPOINT_TTL_MS) {
-      await this.deleteCheckpoint(digest);
-      return undefined;
-    }
-    return value;
-  }
-
-  async saveCheckpoint(checkpoint: LocalCheckpoint): Promise<void> {
-    if (!Array.isArray(checkpoint.pages) || checkpoint.total < 1 || checkpoint.pages.length > checkpoint.total) {
-      throw new Error("Invalid processing checkpoint");
-    }
-    const database = await this.database();
-    const transaction = database.transaction("checkpoints", "readwrite");
-    transaction.objectStore("checkpoints").put(checkpoint);
-    await complete(transaction);
-    database.close();
-  }
-
-  async deleteCheckpoint(digest: string): Promise<void> {
-    const database = await this.database();
-    const transaction = database.transaction("checkpoints", "readwrite");
-    transaction.objectStore("checkpoints").delete(digest);
-    await complete(transaction);
-    database.close();
   }
 
   async sweepOrphans(): Promise<number> {

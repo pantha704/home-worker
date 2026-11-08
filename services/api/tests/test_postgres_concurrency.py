@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from app.config import Settings
+from app.db import ProjectRepository
 from app.main import create_app
 from tests.conftest import make_native_pdf
 
@@ -29,7 +30,6 @@ def pg_settings(tmp_path) -> Iterator[Settings]:
     schema = f"hwtest{uuid4().hex[:10]}"
     settings = Settings(
         app_env="test",
-        allow_test_backends=True,
         database_url=POSTGRES_URL,
         database_schema=schema,
         storage_root=tmp_path / "storage",
@@ -39,6 +39,13 @@ def pg_settings(tmp_path) -> Iterator[Settings]:
         start_worker=False,
         max_projects_per_user=1,
     )
+    repository = ProjectRepository(
+        settings.database_url,
+        schema=schema,
+        auto_create=True,
+    )
+    repository.initialize()
+    repository.engine.dispose()
     yield settings
     engine = create_engine(POSTGRES_URL)
     with engine.begin() as connection:

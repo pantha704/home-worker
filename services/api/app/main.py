@@ -228,7 +228,7 @@ def create_app(
     repository = ProjectRepository(
         config.database_url,
         schema=config.database_schema,
-        auto_create=not config.hosted or config.allow_test_backends,
+        auto_create=not config.hosted,
         max_revisions=config.max_project_revisions,
         max_projects=config.max_projects_per_user,
         max_storage_bytes=config.max_user_storage_bytes,

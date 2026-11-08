@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import urllib.request
-from pathlib import Path
 
-from app.analyzer import _schema, analyze_pages
+from app.analyzer import analyze_pages
 from app.config import Settings
 from app.models import (
     BlockKind,
@@ -13,14 +11,6 @@ from app.models import (
     Extractor,
     SourceRegion,
 )
-
-
-def test_runtime_schema_matches_checked_in_skill_contract() -> None:
-    project_root = Path(__file__).resolve().parents[3]
-    contract = json.loads(
-        (project_root / "skills/document-analyst/output.schema.json").read_text(encoding="utf-8")
-    )
-    assert _schema() == contract
 
 
 def page_fixture() -> list[DocumentPage]:

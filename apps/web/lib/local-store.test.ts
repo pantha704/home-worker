@@ -100,35 +100,6 @@ describe("local project repository", () => {
     await expect(repo.importArchive(new TextEncoder().encode(JSON.stringify(archive)))).rejects.toThrow("Unsupported Homeworker archive");
   });
 
-  it("saves, resumes, and clears a processing checkpoint without creating a project", async () => {
-    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
-    const digest = "abc123";
-    expect(await repo.getCheckpoint(digest)).toBeUndefined();
-    await repo.saveCheckpoint({
-      digest,
-      filename: "notes.pdf",
-      mimeType: "application/pdf",
-      pages: ["FIRST_PAGE_MARKER"],
-      total: 3,
-      extractionVersion: 1,
-      updatedAt: new Date().toISOString(),
-    });
-    expect(await repo.getCheckpoint(digest)).toMatchObject({ pages: ["FIRST_PAGE_MARKER"], total: 3 });
-    await repo.saveCheckpoint({
-      digest,
-      filename: "notes.pdf",
-      mimeType: "application/pdf",
-      pages: ["FIRST_PAGE_MARKER", "SECOND_PAGE_MARKER"],
-      total: 3,
-      text: "FIRST_PAGE_MARKER\n\nSECOND_PAGE_MARKER",
-      extractionVersion: 1,
-      updatedAt: new Date().toISOString(),
-    });
-    expect((await repo.getCheckpoint(digest))?.text).toContain("SECOND_PAGE_MARKER");
-    await repo.deleteCheckpoint(digest);
-    expect(await repo.getCheckpoint(digest)).toBeUndefined();
-  });
-
   it("sweeps unreferenced objects without deleting live source or exports", async () => {
     const objects = new MemoryObjects();
     const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, objects);
@@ -202,30 +173,6 @@ describe("local project repository", () => {
     expect(first.exportPdf).toEqual(bytes("p1"));
     expect(second.project).toMatchObject({ revision: 2, text: "two" });
     expect(second.exportPdf).toEqual(bytes("p2"));
-  });
-
-  it("discards expired or incompatible checkpoints", async () => {
-    const repo = new LocalProjectRepository(`test-${crypto.randomUUID()}`, new MemoryObjects());
-    await repo.saveCheckpoint({
-      digest: "abc",
-      filename: "notes.pdf",
-      mimeType: "application/pdf",
-      pages: ["P1"],
-      total: 2,
-      extractionVersion: 0,
-      updatedAt: new Date().toISOString(),
-    });
-    expect(await repo.getCheckpoint("abc")).toBeUndefined();
-    await repo.saveCheckpoint({
-      digest: "def",
-      filename: "notes.pdf",
-      mimeType: "application/pdf",
-      pages: ["P1"],
-      total: 2,
-      extractionVersion: 1,
-      updatedAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-    });
-    expect(await repo.getCheckpoint("def")).toBeUndefined();
   });
 
   it("rejects archives whose bytes do not match the declared type or active-PDF policy", async () => {

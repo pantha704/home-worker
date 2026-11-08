@@ -54,7 +54,6 @@ class Settings:
     """Runtime settings; local mode remains keyless and hosted mode fails closed."""
 
     app_env: str = "development"
-    allow_test_backends: bool = False
     runtime_mode: str = "local"
     database_url: str = "sqlite:///./data/homeworker.db"
     database_schema: str = "homeworker"

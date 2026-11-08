@@ -11,7 +11,7 @@ from sqlalchemy import update
 
 from app.auth import Identity
 from app.config import Settings
-from app.db import ProjectRow
+from app.db import ProjectRepository, ProjectRow
 from app.errors import InkError
 from app.main import create_app
 from app.models import ExtractionWarning, WarningSeverity
@@ -36,9 +36,12 @@ class StaticTokenVerifier:
 def hosted_settings(tmp_path, **overrides: object) -> Settings:
     values: dict[str, object] = {
         "app_env": "test",
-        "allow_test_backends": True,
         "runtime_mode": "hosted",
         "database_url": f"sqlite:///{tmp_path / 'hosted.db'}",
+        # SQLite keeps its default database in the "main" schema. Naming it here lets the
+        # repository's migration guard find the tables that the test creates below, because
+        # a hosted app never auto-creates its own schema.
+        "database_schema": "main",
         "storage_provider": "local",
         "storage_root": tmp_path / "private-storage",
         "work_root": tmp_path / "work",
@@ -47,7 +50,20 @@ def hosted_settings(tmp_path, **overrides: object) -> Settings:
         "start_worker": False,
     }
     values.update(overrides)
-    return Settings(**values)  # type: ignore[arg-type]
+    settings = Settings(**values)  # type: ignore[arg-type]
+    create_schema(settings)
+    return settings
+
+
+def create_schema(settings: Settings) -> None:
+    """Apply the schema up front, the way a migration does for a hosted deployment."""
+    repository = ProjectRepository(
+        settings.database_url,
+        schema=settings.database_schema,
+        auto_create=True,
+    )
+    repository.initialize()
+    repository.engine.dispose()
 
 
 def headers(token: str = "token-a", *, mutation: bool = False) -> dict[str, str]:
