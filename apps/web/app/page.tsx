@@ -1,5 +1,6 @@
 import { CheckIcon, ShieldIcon, SparkIcon } from "@/components/icons";
 import { RecentProjects } from "@/components/recent-projects";
+import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { getRuntimeMode } from "@/lib/config";
@@ -66,12 +67,7 @@ export default function HomePage() {
         </section>
       </div>
 
-      <footer className="site-footer">
-        <div className="page-shell footer-inner">
-          <span>Homeworker · {hosted ? "Experimental hosted beta" : preview ? "Browser-local OCR" : "Full local application"}</span>
-          <span>Faithful by design.</span>
-        </div>
-      </footer>
+      <SiteFooter note={hosted ? "Experimental hosted beta" : preview ? "Browser-local OCR" : "Full local application"} />
     </main>
   );
 }

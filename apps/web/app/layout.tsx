@@ -14,6 +14,9 @@ export const metadata: Metadata = {
     "Turn PDFs and document images into reviewable, printable notes using licensed handwriting personas.",
   applicationName: "Homeworker",
   robots: { index: false, follow: false },
+  // Provenance marker: every exported page carries the commit it was built from,
+  // so a deploy can be verified against the source that produced it.
+  other: { "homeworker-build": process.env.NEXT_PUBLIC_BUILD_ID ?? "dev" },
 };
 
 export const viewport: Viewport = {

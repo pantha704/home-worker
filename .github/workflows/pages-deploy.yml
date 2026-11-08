@@ -1,0 +1,163 @@
+name: Deploy Pages
+
+# Cloudflare Pages is a direct-upload project: nothing ships unless this job runs.
+# Unlike the GitHub Pages preview workflow, this one deploys the hosted build to the
+# production project and then proves the live HTML came from this commit.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, ever. Queued runs wait instead of cancelling a half-finished
+# upload, so two pushes can never race for the same production alias.
+concurrency:
+  group: pages-deploy-production
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  FORCE_COLOR: "1"
+  PAGES_ORIGIN: https://homeworker-43k.pages.dev
+  PAGES_PROJECT: homeworker
+
+jobs:
+  deploy:
+    name: Build and deploy hosted export
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 11.18.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Require deploy secrets
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # Names only. The values are never printed, quoted, or passed through a shell string.
+        run: |
+          missing=0
+          for name in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository secret $name is not set"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Build hosted static export
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://homeworker-api.onrender.com
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          # Embedded in every page as <meta name="homeworker-build"> so the smoke test
+          # can tell this commit's export apart from whatever the edge served before.
+          NEXT_PUBLIC_BUILD_ID: ${{ github.sha }}
+        run: pnpm --filter @homeworker/web build:hosted
+
+      - name: Check the export before uploading it
+        env:
+          MARKER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for file in apps/web/out/index.html apps/web/out/privacy/index.html apps/web/out/terms/index.html; do
+            if [ ! -s "$file" ]; then
+              echo "::error::Missing export file: $file"
+              exit 1
+            fi
+          done
+          if [ ! -s apps/web/out/_headers ]; then
+            echo "::error::The export has no _headers file; CSP and HSTS would be lost"
+            exit 1
+          fi
+          for file in apps/web/out/index.html apps/web/out/privacy/index.html apps/web/out/terms/index.html; do
+            grep -q 'name="homeworker-build"' "$file" || { echo "::error::$file has no build marker"; exit 1; }
+            grep -q -- "$MARKER" "$file" || { echo "::error::$file carries the wrong build marker"; exit 1; }
+          done
+          echo "Export bytes: $(du -sb apps/web/out | cut -f1)"
+
+      - name: Deploy to Cloudflare Pages
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # The build rewrites tracked and generated files, so the tree is intentionally dirty.
+        run: npx --yes wrangler@4 pages deploy out --project-name "$PAGES_PROJECT" --branch main --commit-dirty=true
+
+      - name: Verify the live site serves this commit
+        env:
+          MARKER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          origin="$PAGES_ORIGIN"
+
+          check_route() {
+            path="$1"
+            expected="$2"
+            attempt=1
+            while [ "$attempt" -le 8 ]; do
+              body="$(curl -fsS --max-time 30 "$origin$path" 2>/dev/null || true)"
+              if [ -n "$body" ] \
+                && printf '%s' "$body" | grep -q 'name="homeworker-build"' \
+                && printf '%s' "$body" | grep -q -- "$MARKER" \
+                && printf '%s' "$body" | grep -q -- "$expected"; then
+                echo "$path served build $MARKER with expected content"
+                return 0
+              fi
+              echo "Attempt $attempt for $path: not this build yet"
+              attempt=$((attempt + 1))
+              sleep 10
+            done
+            echo "::error::$path did not serve expected content for build $MARKER"
+            return 1
+          }
+
+          # A 200 alone proves nothing: a stale deploy also returns 200.
+          check_route "/" "Homeworker"
+          check_route "/privacy/" "14 days"
+          check_route "/terms/" "Acceptable use"
+
+          # The exported _headers file must actually be applied by Pages, not just generated.
+          curl -fsS -D /tmp/live-headers -o /dev/null --max-time 30 "$origin/"
+          if ! grep -qi '^content-security-policy:' /tmp/live-headers; then
+            echo "::error::Production response has no Content-Security-Policy header"
+            exit 1
+          fi
+          if ! grep -qi '^strict-transport-security:' /tmp/live-headers; then
+            echo "::error::Production response has no Strict-Transport-Security header"
+            exit 1
+          fi
+          echo "CSP and HSTS headers present"
+
+          {
+            echo "### Cloudflare Pages deploy"
+            echo ""
+            echo "- Build marker: \`$MARKER\`"
+            echo "- Origin: $origin"
+            echo "- Routes verified: \`/\`, \`/privacy/\`, \`/terms/\`"
+            echo "- CSP and HSTS: present"
+          } >> "$GITHUB_STEP_SUMMARY"
