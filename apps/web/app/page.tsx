@@ -60,8 +60,8 @@ export default function HomePage() {
           <span className="trust-icon"><ShieldIcon size={26} /></span>
           <div>
             <span className="eyebrow">Made for responsible use</span>
-            <h2 id="privacy-heading">{hosted ? "Private by account—acceptance testing is still required." : "Your notes, processed on your machine."}</h2>
-            <p>{hosted ? "This invite-only hosted beta uses private account storage and bounded OCR, but live isolation, retention, and deletion drills remain release gates." : preview ? "Sources stay in this browser (OPFS + IndexedDB). Browser storage is not a backup—export a .homeworker archive. The FastAPI service still has fuller evidence, personas, and multi-page scan support." : "Files stay in your local Homeworker installation and use the FastAPI/Tesseract service on 127.0.0.1. Built-in personas are licensed styles—not copied handwriting or signatures."}</p>
+            <h2 id="privacy-heading">{hosted ? "Private by account, verified end to end." : "Your notes, processed on your machine."}</h2>
+            <p>{hosted ? "This invite-only hosted beta uses private account storage and bounded OCR. Cross-account isolation, restart recovery, 14-day retention, and deletion-with-storage-cleanup are verified against the live stack. It runs on free tiers, so there is no uptime or support SLA." : preview ? "Sources stay in this browser (OPFS + IndexedDB). Browser storage is not a backup—export a .homeworker archive. The FastAPI service still has fuller evidence, personas, and multi-page scan support." : "Files stay in your local Homeworker installation and use the FastAPI/Tesseract service on 127.0.0.1. Built-in personas are licensed styles—not copied handwriting or signatures."}</p>
           </div>
         </section>
       </div>

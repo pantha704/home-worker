@@ -1,6 +1,6 @@
 # Version baseline
 
-Reviewed: 2026-08-03
+Reviewed: 2026-11-08
 
 Homeworker pins executable dependencies so a local checkout and CI resolve the same tested graph. The lockfiles are authoritative; this file explains the deliberate top-level baseline.
 
@@ -20,14 +20,14 @@ Homeworker pins executable dependencies so a local checkout and CI resolve the s
 
 | Package | Pin |
 |---|---:|
-| Next.js | 16.2.10 |
+| Next.js | 16.4.1 |
 | React / React DOM | 19.2.7 |
 | TypeScript | 5.9.3 |
-| ESLint / eslint-config-next | 9.39.1 / 16.2.10 |
-| Vite / Vitest | 8.1.4 / 4.1.10 |
+| ESLint / eslint-config-next | 9.39.1 / 16.4.1 |
+| Vite / Vitest | 8.1.6 / 4.1.12 |
 | Playwright | 1.61.1 |
 | Testing Library React | 16.3.2 |
-| PostCSS override | 8.5.19 |
+| PostCSS override | 8.5.23 |
 | Supabase JS | 2.111.0 |
 
 The PostCSS workspace override keeps Next.js on the patched 8.5 line. TypeScript and ESLint intentionally remain on tested compatibility lines instead of moving to incompatible next-major parser/rule APIs.
@@ -41,7 +41,8 @@ The PostCSS workspace override keeps Next.js on the patched 8.5 line. TypeScript
 | Pydantic | 2.13.4 |
 | SQLAlchemy | 2.0.51 |
 | PyMuPDF | 1.28.0 |
-| Pillow | 12.3.0 |
+| Pillow | 13.0.0 |
+| PyJWT | 2.15.0 |
 | pytesseract | 0.3.13 |
 | ReportLab | 5.0.0 |
 | Ruff | 0.15.21 |
@@ -69,3 +70,5 @@ uvx pip-audit --requirement /tmp/homeworker-requirements.txt
 ```
 
 Do not replace a tested compatibility pin merely to match a higher major version number. Record the reason and upgrade when the full toolchain supports it.
+
+Security exceptions override the compatibility rule: a HIGH or CRITICAL advisory is fixed immediately, even across a major version, provided the full suite and the browser e2e run stay green. `--no-hashes` is required when exporting the lockfile for `pip-audit`, because hash checking aborts the dry-run install.
