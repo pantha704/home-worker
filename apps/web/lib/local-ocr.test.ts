@@ -29,10 +29,18 @@ describe("browser-local OCR", () => {
   it("refuses PDF bytes and unconfigured browser assets", async () => {
     await expect(extractImageText(new TextEncoder().encode("%PDF-1.7"), { langPath })).rejects.toThrow("PNG and JPEG");
     expect(() => browserOcrAssets("file://")).toThrow("not configured");
-    expect(browserOcrAssets("https://home-worker.pages.dev")).toEqual({
+    expect(browserOcrAssets("https://home-worker.pages.dev", "")).toEqual({
       workerPath: "https://home-worker.pages.dev/tesseract/worker.min.js",
       corePath: "https://home-worker.pages.dev/tesseract/core",
       langPath: "https://home-worker.pages.dev/tesseract/lang",
+    });
+  });
+
+  it("prefixes OCR assets with a project-site base path", () => {
+    expect(browserOcrAssets("https://pantha704.github.io", "/home-worker")).toEqual({
+      workerPath: "https://pantha704.github.io/home-worker/tesseract/worker.min.js",
+      corePath: "https://pantha704.github.io/home-worker/tesseract/core",
+      langPath: "https://pantha704.github.io/home-worker/tesseract/lang",
     });
   });
 });

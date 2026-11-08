@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 
 import { AuthProvider } from "@/components/auth-provider";
+import { getBasePath } from "@/lib/config";
 
 import "./globals.css";
 
@@ -23,8 +24,30 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const basePath = getBasePath();
+  const fontFaces = `
+  @font-face {
+    font-family: "Ink Scholar";
+    font-display: swap;
+    src: url("${basePath}/fonts/Kalam-Regular.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Ink Casual";
+    font-display: swap;
+    src: url("${basePath}/fonts/Caveat-Regular.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Ink Compact";
+    font-display: swap;
+    src: url("${basePath}/fonts/PatrickHand-Regular.woff2") format("woff2");
+  }`;
+
   return (
     <html data-scroll-behavior="smooth" lang="en">
+      <head>
+        {/* Font URLs must carry the host path prefix, which static CSS cannot know. */}
+        <style dangerouslySetInnerHTML={{ __html: fontFaces }} />
+      </head>
       <body><AuthProvider>{children}</AuthProvider></body>
     </html>
   );

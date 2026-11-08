@@ -1,5 +1,13 @@
 const DEFAULT_API_BASE_URL = "http://localhost:8000";
 
+/**
+ * Path prefix for hosts that serve the app from a subdirectory, such as a
+ * GitHub Pages project site. Empty for root-origin hosts and local development.
+ */
+export function getBasePath(): string {
+  return (process.env.NEXT_PUBLIC_BASE_PATH ?? "").trim().replace(/\/+$/, "");
+}
+
 export type RuntimeMode = "local-service" | "browser-preview" | "hosted";
 
 export function getRuntimeMode(): RuntimeMode {
